@@ -1,0 +1,415 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ===== قواعد الأدمن =====
+    match /admins/{adminId} {
+      // السماح للأدمن بقراءة وكتابة بياناته الخاصة
+      allow read, write: if request.auth != null && request.auth.uid == adminId;
+      
+      // السماح بإنشاء مستند أدمن جديد أثناء التسجيل
+      allow create: if request.auth != null && request.auth.uid == adminId;
+      
+      // السماح للأدمن الآخرين بقراءة بيانات الأدمن
+      allow read: if request.auth != null && 
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+    
+    // ===== قواعد المدرسين =====
+    match /teachers/{teacherId} {
+      // السماح للمدرس بقراءة وكتابة بياناته الخاصة
+      allow read, write: if request.auth != null && request.auth.uid == teacherId;
+      
+      // السماح بإنشاء مستند مدرس جديد أثناء التسجيل
+      allow create: if request.auth != null && request.auth.uid == teacherId;
+      
+      // السماح للمستخدمين المصادق عليهم بقراءة بيانات المدرسين (للطلاب والمدرسين الآخرين)
+      allow read: if request.auth != null;
+      
+      // السماح بقراءة بيانات المدرسين للبحث عن inviteCode حتى للمستخدمين غير المصادق عليهم
+      // هذا ضروري لتسجيل دخول الطلاب الجدد
+      allow read: if true;
+      
+      // السماح للأدمن بقراءة وكتابة جميع بيانات المدرسين
+      allow read, write: if request.auth != null && 
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+    
+    // ===== قواعد الطلاب =====
+    match /students/{studentId} {
+      // السماح للطالب بقراءة وكتابة بياناته الخاصة
+      allow read, write: if request.auth != null && request.auth.uid == studentId;
+
+      // السماح بإنشاء مستند طالب جديد أثناء التسجيل
+      allow create: if request.auth != null && request.auth.uid == studentId;
+
+      // السماح للمدرس المرتبط بتحديث حقول محددة لطلابهم (مثل enrolledCourses)
+      // يسمح فقط إذا كان الطالب مرتبطاً بالمدرس
+      allow update: if request.auth != null &&
+        exists(/databases/$(database)/documents/teachers/$(request.auth.uid)) &&
+        (
+          resource.data.teacherId == request.auth.uid ||
+          request.resource.data.teacherId == request.auth.uid
+        );
+
+      // السماح للمدرسين المرتبطين بقراءة بيانات الطلاب
+      allow read: if request.auth != null && 
+        exists(/databases/$(database)/documents/teachers/$(request.auth.uid));
+      
+      // السماح بقراءة بيانات الطلاب للبحث عنهم أثناء تسجيل الدخول
+      allow read: if request.auth != null;
+      
+      // السماح للأدمن بقراءة وكتابة جميع بيانات الطلاب
+      allow read, write: if request.auth != null && 
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+    
+    // ===== قواعد روابط الطلاب والمدرسين =====
+    match /studentTeacherLinks/{linkId} {
+      // السماح للطالب والمدرس المرتبطين بقراءة الرابط
+      allow read: if request.auth != null && 
+        (resource.data.studentId == request.auth.uid || 
+         resource.data.teacherId == request.auth.uid);
+      
+      // السماح للطالب بإنشاء رابط جديد
+      allow create: if request.auth != null && 
+        request.resource.data.studentId == request.auth.uid;
+      
+      // السماح للمدرس بتحديث حالة الرابط
+      allow update: if request.auth != null && 
+        resource.data.teacherId == request.auth.uid;
+      
+      // السماح للأدمن بقراءة وكتابة جميع الروابط
+      allow read, write: if request.auth != null && 
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+    
+    // ===== قواعد الدورات =====
+    match /courses/{courseId} {
+      // السماح بقراءة الكورسات المنشورة والنشطة للجميع بما فيهم غير المصادق عليهم
+      allow read: if resource.data.status == 'published' && resource.data.isActive == true;
+
+      // القراءة:
+      // - الكورسات المنشورة والنشطة للجميع المصادق عليهم
+      // - جميع كورسات المدرس لنفسه
+      // - جميع الكورسات للمشرف
+      allow read: if request.auth != null && (
+        (
+          resource.data.status == 'published' &&
+          resource.data.isActive == true
+        ) ||
+        resource.data.instructorId == request.auth.uid ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+
+      // السماح للطلاب المصادق عليهم بقراءة جميع الكورسات (لدعم عرض كورسات المدرس للطالب)
+      allow read: if request.auth != null && 
+        exists(/databases/$(database)/documents/students/$(request.auth.uid));
+
+      // الكتابة:
+      // - المدرس يكتب كورساته الخاصة
+      // - المشرف يكتب جميع الكورسات
+      allow write: if request.auth != null && (
+        request.resource.data.instructorId == request.auth.uid ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    // ===== قواعد الامتحانات =====
+    match /exams/{examId} {
+      // القراءة:
+      // - المدرس صاحب الامتحان
+      // - الأدمن
+      // - الطالب المسجل في الكورس الخاص بالامتحان
+      allow read: if request.auth != null && (
+        resource.data.instructorId == request.auth.uid ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        (
+          exists(/databases/$(database)/documents/students/$(request.auth.uid)) &&
+          resource.data.courseId in get(/databases/$(database)/documents/students/$(request.auth.uid)).data.enrolledCourses
+        )
+      );
+
+      // الإنشاء: المدرس فقط لامتحاناته أو الأدمن
+      allow create: if request.auth != null && (
+        request.resource.data.instructorId == request.auth.uid ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+
+      // التحديث والحذف: المدرس صاحب الامتحان أو الأدمن
+      allow update, delete: if request.auth != null && (
+        resource.data.instructorId == request.auth.uid ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+    
+    // ===== قواعد التسجيلات =====
+    match /enrollments/{enrollmentId} {
+      // السماح للطلاب بقراءة تسجيلاتهم الخاصة
+      allow read: if request.auth != null && resource.data.studentId == request.auth.uid;
+      
+      // السماح للطلاب بإنشاء تسجيل جديد لأنفسهم
+      allow create: if request.auth != null && request.resource.data.studentId == request.auth.uid;
+      
+      // السماح للمدرسين بقراءة تسجيلات طلابهم
+      allow read: if request.auth != null && 
+        exists(/databases/$(database)/documents/teachers/$(request.auth.uid));
+      
+      // السماح للأدمن بقراءة وكتابة جميع التسجيلات
+      allow read, write: if request.auth != null && 
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+    
+    // ===== قواعد الإشعارات =====
+    match /notifications/{notificationId} {
+      // السماح للمستخدمين بقراءة إشعاراتهم الخاصة
+      allow read: if request.auth != null && resource.data.userId == request.auth.uid;
+      
+      // السماح للمستخدمين بتحديث حالة قراءة إشعاراتهم
+      allow update: if request.auth != null && 
+        resource.data.userId == request.auth.uid &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead', 'readAt']);
+      
+      // السماح للمدرسين والأدمن بإنشاء إشعارات
+      allow create: if request.auth != null && 
+        (exists(/databases/$(database)/documents/teachers/$(request.auth.uid)) ||
+         exists(/databases/$(database)/documents/admins/$(request.auth.uid)));
+      
+      // السماح للأدمن بقراءة وكتابة جميع الإشعارات
+      allow read, write: if request.auth != null && 
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+    
+    // ===== قواعد الدعم الفني =====
+    match /supportConversations/{conversationId} {
+      // السماح للمستخدمين بقراءة وكتابة محادثات الدعم الخاصة بهم
+      // عن طريق الحقل userId أو عندما يكون معرف المستند هو معرف المستخدم
+      allow read, write: if request.auth != null && (
+        resource.data.userId == request.auth.uid ||
+        conversationId == request.auth.uid
+      );
+      
+      // السماح للأدمن بقراءة وكتابة جميع محادثات الدعم
+      allow read, write: if request.auth != null && 
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+    
+    match /supportMessages/{messageId} {
+      // السماح للمستخدمين بقراءة وكتابة رسائل الدعم في محادثاتهم
+      allow read, write: if request.auth != null && 
+        exists(/databases/$(database)/documents/supportConversations/$(request.resource.data.conversationId)) &&
+        get(/databases/$(database)/documents/supportConversations/$(request.resource.data.conversationId)).data.userId == request.auth.uid;
+      
+      // السماح للأدمن بقراءة وكتابة جميع رسائل الدعم
+      allow read, write: if request.auth != null && 
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+    
+    // ===== قواعد سجلات النشاط =====
+    match /activityLogs/{logId} {
+      // السماح للمستخدمين بقراءة سجلات نشاطهم الخاصة
+      allow read: if request.auth != null && resource.data.userId == request.auth.uid;
+      
+      // السماح بإنشاء سجلات نشاط جديدة
+      allow create: if request.auth != null;
+      
+      // السماح للأدمن بقراءة جميع سجلات النشاط
+      allow read: if request.auth != null && 
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+    
+    // ===== قواعد إعدادات المدرسين =====
+    match /teacherSettings/{teacherId} {
+      // السماح للمدرس بقراءة وكتابة إعداداته الخاصة
+      allow read, write: if request.auth != null && request.auth.uid == teacherId;
+      
+      // السماح بإنشاء مستند إعدادات جديد للمدرس
+      allow create: if request.auth != null && request.auth.uid == teacherId;
+      
+      // السماح للأدمن بقراءة وكتابة جميع إعدادات المدرسين
+      allow read, write: if request.auth != null && 
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+    
+    // ===== قواعد تقدم الطلاب =====
+    match /studentProgress/{progressId} {
+      // السماح للطلاب بقراءة وكتابة تقدمهم الخاص
+      // progressId format: studentId_courseId
+      allow read, write: if request.auth != null && 
+        progressId.matches('^' + request.auth.uid + '_.*');
+      
+      // السماح للمدرسين بقراءة تقدم طلابهم
+      allow read: if request.auth != null && 
+        exists(/databases/$(database)/documents/teachers/$(request.auth.uid));
+      
+      // السماح للأدمن بقراءة وكتابة جميع بيانات التقدم
+      allow read, write: if request.auth != null && 
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+    
+    // ===== قواعد الدروس داخل الكورسات =====
+    match /courses/{courseId}/lessons/{lessonId} {
+      // السماح للطلاب المسجلين بقراءة الدروس
+      allow read: if request.auth != null && 
+        exists(/databases/$(database)/documents/students/$(request.auth.uid));
+      
+      // السماح للمدرسين بقراءة وكتابة دروس كورساتهم
+      allow read, write: if request.auth != null && 
+        exists(/databases/$(database)/documents/teachers/$(request.auth.uid));
+      
+      // السماح للأدمن بقراءة وكتابة جميع الدروس
+      allow read, write: if request.auth != null && 
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    // ===== قواعد طلبات الاشتراك =====
+    match /subscriptionRequests/{requestId} {
+      // إنشاء طلب اشتراك: الطالب فقط
+      allow create: if request.auth != null && request.resource.data.studentId == request.auth.uid;
+
+      // قراءة الطلبات:
+      // - الطالب يقرأ طلبه
+      // - المدرس يقرأ طلبات طلابه (teacherId)
+      // - الأدمن يقرأ كل شيء
+      allow read: if request.auth != null && (
+        resource.data.studentId == request.auth.uid ||
+        resource.data.teacherId == request.auth.uid ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+
+      // تحديث الطلبات: المدرس فقط يمكنه تغيير الحالة والتواريخ وسبب الرفض
+      allow update: if request.auth != null &&
+        resource.data.teacherId == request.auth.uid &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'processedAt', 'rejectionReason']);
+    }
+
+    // نسخة الطالب من طلبات الاشتراك داخل مستند الطالب
+    match /students/{studentId}/subscriptionRequests/{reqId} {
+      // إنشاء داخل مسار الطالب: الطالب فقط
+      allow create: if request.auth != null && request.auth.uid == studentId;
+
+      // قراءة:
+      // - الطالب يقرأ طلباته
+      // - المدرس المرتبط بالطلب يقرأه عبر teacherId
+      // - الأدمن يقرأ كل شيء
+      allow read: if request.auth != null && (
+        request.auth.uid == studentId ||
+        resource.data.teacherId == request.auth.uid ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+
+      // تحديث محدود من الطالب (اختياري): تعديل لقطة الدفع فقط حين تكون الحالة معلقة
+      allow update: if request.auth != null && request.auth.uid == studentId &&
+        resource.data.status == 'pending' &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['screenshotUrl']);
+    }
+
+    // ===== قواعد الإعدادات العامة =====
+    match /settings/{settingId} {
+      // السماح للجميع بقراءة الإعدادات العامة
+      allow read: if true;
+      
+      // السماح للأدمن فقط بكتابة الإعدادات
+      allow write: if request.auth != null && 
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    // ===== قواعد الواجبات =====
+    match /assignments/{assignmentId} {
+      // القراءة:
+      // - المدرس صاحب الواجب
+      // - الأدمن
+      // - الطالب المسجل يقرأ الواجبات المنشورة لكورسات مسجل بها
+      allow read: if request.auth != null && (
+        resource.data.instructorId == request.auth.uid ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        (
+          exists(/databases/$(database)/documents/students/$(request.auth.uid)) &&
+          resource.data.isPublished == true &&
+          resource.data.courseId in get(/databases/$(database)/documents/students/$(request.auth.uid)).data.enrolledCourses
+        )
+      );
+
+      // الإنشاء: المدرس أو الأدمن
+      allow create: if request.auth != null && (
+        (
+          request.resource.data.instructorId == request.auth.uid &&
+          get(/databases/$(database)/documents/courses/$(request.resource.data.courseId)).data.instructorId == request.auth.uid
+        ) ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+
+      // التحديث والحذف: المدرس صاحب الواجب أو الأدمن
+      allow update, delete: if request.auth != null && (
+        resource.data.instructorId == request.auth.uid ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    // ===== قواعد محاولات الواجبات =====
+    match /assignmentAttempts/{attemptId} {
+      // القراءة:
+      // - الطالب صاحب المحاولة
+      // - المدرس صاحب الواجب
+      // - الأدمن
+      allow read: if request.auth != null && (
+        resource.data.studentId == request.auth.uid ||
+        resource.data.instructorId == request.auth.uid ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        (
+          exists(/databases/$(database)/documents/assignments/$(resource.data.assignmentId)) &&
+          get(/databases/$(database)/documents/assignments/$(resource.data.assignmentId)).data.instructorId == request.auth.uid
+        )
+      );
+
+      // الإنشاء: الطالب فقط على واجب منشور ضمن كورس مسجل به
+      allow create: if request.auth != null &&
+        request.resource.data.studentId == request.auth.uid &&
+        exists(/databases/$(database)/documents/assignments/$(request.resource.data.assignmentId)) &&
+        get(/databases/$(database)/documents/assignments/$(request.resource.data.assignmentId)).data.isPublished == true &&
+        (
+          get(/databases/$(database)/documents/assignments/$(request.resource.data.assignmentId)).data.courseId in get(/databases/$(database)/documents/students/$(request.auth.uid)).data.enrolledCourses
+        );
+
+      // التحديث: المدرس صاحب الواجب (تصحيح يدوي) أو الأدمن
+      allow update: if request.auth != null && (
+        // السماح للأدمن
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        // السماح للمدرس صاحب الواجب بتحديث حقول التصحيح فقط
+        (
+          (
+            // 1) المدرس مطابق لحقل instructorId داخل المحاولة
+            resource.data.instructorId == request.auth.uid ||
+            // 2) التحقق عبر assignmentId الموجود في المستند الحالي
+            (
+              resource.data.assignmentId != null &&
+              exists(/databases/$(database)/documents/assignments/$(resource.data.assignmentId)) &&
+              get(/databases/$(database)/documents/assignments/$(resource.data.assignmentId)).data.instructorId == request.auth.uid
+            ) ||
+            // 3) التحقق عبر assignmentId القادم من الطلب (لإصلاح محاولات قديمة مفقود بها الربط)
+            (
+              request.resource.data.assignmentId != null &&
+              exists(/databases/$(database)/documents/assignments/$(request.resource.data.assignmentId)) &&
+              get(/databases/$(database)/documents/assignments/$(request.resource.data.assignmentId)).data.instructorId == request.auth.uid
+            )
+          ) &&
+          // السماح فقط بتعديل حقول التصحيح اليدوي + حقول الربط
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'totalPoints', 'earnedPoints', 'totalQuestions', 'correctQuestions',
+            'total', 'correct', 'gradedAt', 'feedback', 'questionResults',
+            'assignmentId', 'instructorId'
+          ]) &&
+          // في حال تمرير instructorId ضمن التحديث يجب أن يساوي هوية المدرس الحالية
+          (
+            !(request.resource.data.diff(resource.data).changedKeys().hasAny(['instructorId'])) ||
+            request.resource.data.instructorId == request.auth.uid
+          )
+        )
+      );
+
+      // الحذف: الأدمن فقط
+      allow delete: if request.auth != null &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+  }
+}

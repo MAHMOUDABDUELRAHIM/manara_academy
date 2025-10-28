@@ -1,0 +1,106 @@
+/* تأثيرات بصرية للرسائل الجديدة */
+.new-message-highlight {
+  animation: newMessagePulse 2s ease-in-out;
+}
+
+@keyframes newMessagePulse {
+  0% {
+    background-color: rgba(59, 130, 246, 0.1);
+    transform: scale(1);
+  }
+  50% {
+    background-color: rgba(59, 130, 246, 0.2);
+    transform: scale(1.02);
+  }
+  100% {
+    background-color: transparent;
+    transform: scale(1);
+  }
+}
+
+/* تأثير للرسائل الجديدة من الأدمن */
+.admin-message-new {
+  animation: adminMessageSlide 0.5s ease-out;
+}
+
+@keyframes adminMessageSlide {
+  0% {
+    opacity: 0;
+    transform: translateX(-20px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* تأثير للرسائل الجديدة من المستخدم */
+.user-message-new {
+  animation: userMessageSlide 0.5s ease-out;
+}
+
+@keyframes userMessageSlide {
+  0% {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* مؤشر الكتابة */
+.typing-indicator {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 12px;
+  background-color: rgba(156, 163, 175, 0.1);
+  border-radius: 12px;
+  margin: 4px 0;
+}
+
+.typing-dot {
+  width: 6px;
+  height: 6px;
+  background-color: #9CA3AF;
+  border-radius: 50%;
+  animation: typingDots 1.4s infinite ease-in-out;
+}
+
+.typing-dot:nth-child(1) {
+  animation-delay: -0.32s;
+}
+
+.typing-dot:nth-child(2) {
+  animation-delay: -0.16s;
+}
+
+@keyframes typingDots {
+  0%, 80%, 100% {
+    transform: scale(0);
+    opacity: 0.5;
+  }
+  40% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* تأثير النبضة للأيقونة العائمة عند وجود رسائل جديدة */
+.chat-icon-pulse {
+  animation: chatIconPulse 2s infinite;
+}
+
+@keyframes chatIconPulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.7);
+  }
+  70% {
+    box-shadow: 0 0 0 10px rgba(59, 130, 246, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(59, 130, 246, 0);
+  }
+}

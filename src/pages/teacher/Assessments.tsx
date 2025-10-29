@@ -392,7 +392,9 @@ if (courseIdForExam) {
     setAssignmentInboxLoading(true);
     try {
       const items = await AssignmentService.getManualInboxForTeacher(user.uid);
-      setAssignmentInboxItems(items || []);
+      // Safeguard: exclude any attempts that already have gradedAt to prevent reappearing cards
+      const pendingOnly = (items || []).filter((it: any) => !it?.gradedAt);
+      setAssignmentInboxItems(pendingOnly);
     } catch (err) {
       console.error('Error loading assignment inbox', err);
       toast.error(language === 'ar' ? 'تعذر تحميل صندوق الواجبات' : 'Failed to load assignment inbox');
@@ -449,6 +451,8 @@ if (courseIdForExam) {
           courseId: assignmentGradingAttempt.courseId,
         });
       } catch {}
+      // Optimistically remove the graded attempt from the inbox to prevent it from reappearing
+      setAssignmentInboxItems((prev) => prev.filter((it: any) => it.attemptId !== assignmentGradingAttempt.attemptId));
       await loadAssignmentInbox();
       // Reset
       setAssignmentSubsection('create');
@@ -2404,11 +2408,28 @@ if (courseIdForExam) {
                                   <div className="mt-2 text-sm">{language === 'ar' ? 'إجابة الطالب:' : 'Student answer:'} <span className="font-semibold">{ansText}</span></div>
                                 </div>
                                 <div className="flex items-center gap-2">
-                                  <Button variant={isCorrect === true ? 'default' : 'outline'} size="sm" onClick={() => setAssignmentGradingCorrect(prev => ({ ...prev, [q.id]: true }))}><CheckCircle2 className="h-4 w-4" /></Button>
-                                  <Button variant={isCorrect === false ? 'destructive' : 'outline'} size="sm" onClick={() => setAssignmentGradingCorrect(prev => ({ ...prev, [q.id]: false }))}><XCircle className="h-4 w-4" /></Button>
+                                  <Button
+                                    variant={isCorrect === true ? 'default' : 'outline'}
+                                    size="sm"
+                                    onClick={() => {
+                                      setAssignmentGradingCorrect(prev => ({ ...prev, [q.id]: true }));
+                                      setAssignmentGradingPoints(prev => ({ ...prev, [q.id]: maxPts }));
+                                    }}
+                                  >
+                                    <CheckCircle2 className="h-4 w-4" />
+                                  </Button>
+                                  <Button
+                                    variant={isCorrect === false ? 'destructive' : 'outline'}
+                                    size="sm"
+                                    onClick={() => {
+                                      setAssignmentGradingCorrect(prev => ({ ...prev, [q.id]: false }));
+                                      setAssignmentGradingPoints(prev => ({ ...prev, [q.id]: 0 }));
+                                    }}
+                                  >
+                                    <XCircle className="h-4 w-4" />
+                                  </Button>
                                   <div className="flex items-center gap-1">
-                                    <Input type="number" className="w-20" min={0} max={maxPts} value={awarded} onChange={(e) => setAssignmentGradingPoints(prev => ({ ...prev, [q.id]: Math.min(Math.max(0, Number(e.target.value) || 0), maxPts) }))} />
-                                    <span className="text-xs text-muted-foreground">/ {maxPts}</span>
+                                    <span className="text-xs text-muted-foreground">{language === 'ar' ? `من ${maxPts}` : `of ${maxPts}`}</span>
                                   </div>
                                 </div>
                               </div>

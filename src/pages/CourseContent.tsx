@@ -80,6 +80,26 @@ const CourseContent = () => {
     loadExamResult();
   }, [selectedItem?.id, selectedItem?.type, user?.uid]);
 
+  // Load student's assignment attempts to prevent reopening questions after submission
+  useEffect(() => {
+    async function loadAssignmentAttempts() {
+      try {
+        if (!user?.uid) return;
+        const attempts = await AssignmentService.getAssignmentAttemptsForStudent(user.uid);
+        const map: Record<string, any> = {};
+        for (const att of attempts) {
+          if (att.assignmentId) {
+            map[att.assignmentId] = att;
+          }
+        }
+        setAssignmentResults(map);
+      } catch (e) {
+        console.warn('Failed to load assignment attempts for student', e);
+      }
+    }
+    loadAssignmentAttempts();
+  }, [user?.uid]);
+
   // Load student's exam attempt timing info for duration calculation
   useEffect(() => {
     async function loadExamAttempt() {
@@ -445,6 +465,8 @@ const CourseContent = () => {
         {language === 'ar' ? 'لم يتم العثور على الواجب' : 'Assignment not found'}
       </div>
     );
+    // If there's an existing attempt for this assignment, do not show the questions again
+    if (assignmentResults[asg.id!]) return null;
     return (
       <div className="space-y-4">
         <div>
@@ -770,6 +792,12 @@ if (hasEnded || hasResult) {
       toast.error(language === 'ar' ? 'يرجى تسجيل الدخول للمحاولة' : 'Please login to attempt');
       return;
     }
+    // Confirm submission before finalizing
+    const confirmed = window.confirm(language === 'ar'
+      ? 'هل أنت متأكد من إنهاء وتسليم الواجب؟ لن تظهر الأسئلة مرة أخرى وسيتم عرض النتائج.'
+      : 'Are you sure you want to finish and submit the assignment? Questions will not reappear and results will be shown.'
+    );
+    if (!confirmed) return;
     
     // Find the assignment to check if manual grading is enabled
     const assignment = assignments.find(a => a.id === assignmentId);
@@ -941,7 +969,14 @@ if (hasEnded || hasResult) {
                             <>
                               <button
                                 key={`${item.type}-${item.id}`}
-                                onClick={() => setSelectedItem({ type: item.type, id: item.id })}
+                                onClick={() => {
+                                  setSelectedItem({ type: item.type, id: item.id });
+                                  // If assignment already submitted, immediately show results view
+                                  if (item.type === 'assignment' && assignmentResults[item.id]) {
+                                    setShowingResultsForAssignment(item.id);
+                                    setActiveAssignmentId(null);
+                                  }
+                                }}
                                 className={`w-full text-left flex items-center gap-3 px-4 py-3 transition-colors ${isSelected ? 'bg-primary/5' : 'bg-transparent'} hover:bg-muted/60`}
                               >
                                 <span className="flex-shrink-0 inline-flex items-center justify-center h-8 w-8 rounded-md bg-gray-100 dark:bg-gray-800">
@@ -951,6 +986,9 @@ if (hasEnded || hasResult) {
                                   <p className="font-medium">{item.title}</p>
                                   {item.subtitle && <p className="text-xs text-muted-foreground">{item.subtitle}</p>}
                                 </div>
+                                {item.type === 'assignment' && assignmentResults[item.id] && (
+                                  <Badge variant="secondary" className="flex-shrink-0">{language === 'ar' ? 'تم التسليم' : 'Submitted'}</Badge>
+                                )}
                                 {item.type === 'lesson' && completedLessons.has(String(item.id)) && (
                                   <CheckCircle2 className="h-5 w-5 text-green-600 flex-shrink-0" />
                                 )}

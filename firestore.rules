@@ -380,14 +380,16 @@ service cloud.firestore {
           (
             // 1) المدرس مطابق لحقل instructorId داخل المحاولة
             resource.data.instructorId == request.auth.uid ||
-            // 2) التحقق عبر assignmentId الموجود في المستند الحالي
+            // 2) التحقق عبر assignmentId الموجود في المستند الحالي (إذا كان موجوداً)
             (
+              resource.data.keys().hasAny(['assignmentId']) &&
               resource.data.assignmentId != null &&
               exists(/databases/$(database)/documents/assignments/$(resource.data.assignmentId)) &&
               get(/databases/$(database)/documents/assignments/$(resource.data.assignmentId)).data.instructorId == request.auth.uid
             ) ||
             // 3) التحقق عبر assignmentId القادم من الطلب (لإصلاح محاولات قديمة مفقود بها الربط)
             (
+              request.resource.data.keys().hasAny(['assignmentId']) &&
               request.resource.data.assignmentId != null &&
               exists(/databases/$(database)/documents/assignments/$(request.resource.data.assignmentId)) &&
               get(/databases/$(database)/documents/assignments/$(request.resource.data.assignmentId)).data.instructorId == request.auth.uid

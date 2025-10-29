@@ -304,6 +304,9 @@ export default class AssignmentService {
       }
     } catch {}
     await updateDoc(attemptRef, stripUndefinedDeep({
+      // Ensure linkage and instructor identity for rules checks
+      assignmentId,
+      instructorId: (assignment as any)?.instructorId,
       ...fixFields,
       totalPoints,
       earnedPoints,
@@ -329,6 +332,7 @@ export default class AssignmentService {
     studentName?: string;
     courseId?: string;
     createdAt?: Date;
+    gradedAt?: Date | null;
     answers?: Record<string, string>;
     totalPoints?: number;
     earnedPoints?: number;
@@ -383,11 +387,13 @@ export default class AssignmentService {
           studentName,
           courseId: data.courseId,
           createdAt: data.createdAt?.toDate?.() || new Date(),
+          gradedAt: data.gradedAt?.toDate?.() || null,
           answers: data.answers,
           totalPoints: data.totalPoints,
           earnedPoints: data.earnedPoints,
           totalQuestions: data.totalQuestions,
           correctQuestions: data.correctQuestions,
+          questionResults: data.questionResults,
           courseTitle,
           submittedAt: data.createdAt?.toDate?.() || new Date(),
         };
@@ -421,11 +427,13 @@ export default class AssignmentService {
             studentName,
             courseId: data.courseId,
             createdAt: data.createdAt?.toDate?.() || new Date(),
+            gradedAt: data.gradedAt?.toDate?.() || null,
             answers: data.answers,
             totalPoints: data.totalPoints,
             earnedPoints: data.earnedPoints,
             totalQuestions: data.totalQuestions,
             correctQuestions: data.correctQuestions,
+            questionResults: data.questionResults,
             courseTitle: courseTitleMap[cid],
             submittedAt: data.createdAt?.toDate?.() || new Date(),
           };
@@ -462,11 +470,13 @@ export default class AssignmentService {
             studentName,
             courseId: data.courseId,
             createdAt: data.createdAt?.toDate?.() || new Date(),
+            gradedAt: data.gradedAt?.toDate?.() || null,
             answers: data.answers,
             totalPoints: data.totalPoints,
             earnedPoints: data.earnedPoints,
             totalQuestions: data.totalQuestions,
             correctQuestions: data.correctQuestions,
+            questionResults: data.questionResults,
             courseTitle,
             submittedAt: data.createdAt?.toDate?.() || new Date(),
           };
@@ -478,7 +488,8 @@ export default class AssignmentService {
     }
 
     // Resolve assignment titles for any entries missing them (best-effort)
-    const items = Array.from(itemsMap.values());
+    // Only include attempts that still need grading. Exclude those with gradedAt or with questionResults already present.
+    const items = Array.from(itemsMap.values()).filter(it => !it.gradedAt && !it.questionResults);
     const missingTitleIds = Array.from(new Set(items.filter(it => !it.assignmentTitle).map(it => it.assignmentId)));
     for (const aid of missingTitleIds) {
       try {

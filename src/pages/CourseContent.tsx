@@ -80,24 +80,33 @@ const CourseContent = () => {
     loadExamResult();
   }, [selectedItem?.id, selectedItem?.type, user?.uid]);
 
-  // Load student's assignment attempts to prevent reopening questions after submission
+  // Load and subscribe to student's assignment attempts so results update in realtime when teacher publishes grades
   useEffect(() => {
-    async function loadAssignmentAttempts() {
+    let unsubscribe: (() => void) | undefined;
+    const init = async () => {
       try {
         if (!user?.uid) return;
+        // Initial load
         const attempts = await AssignmentService.getAssignmentAttemptsForStudent(user.uid);
-        const map: Record<string, any> = {};
+        const initialMap: Record<string, any> = {};
         for (const att of attempts) {
-          if (att.assignmentId) {
-            map[att.assignmentId] = att;
-          }
+          if (att.assignmentId) initialMap[att.assignmentId] = att;
         }
-        setAssignmentResults(map);
+        setAssignmentResults(initialMap);
+        // Subscribe for live updates (gradedAt/questionResults)
+        unsubscribe = AssignmentService.listenAssignmentAttemptsForStudent(user.uid, (list) => {
+          const map: Record<string, any> = {};
+          for (const att of list) {
+            if (att.assignmentId) map[att.assignmentId] = att;
+          }
+          setAssignmentResults(map);
+        });
       } catch (e) {
-        console.warn('Failed to load assignment attempts for student', e);
+        console.warn('Failed to watch assignment attempts for student', e);
       }
-    }
-    loadAssignmentAttempts();
+    };
+    init();
+    return () => { try { if (unsubscribe) unsubscribe(); } catch {} };
   }, [user?.uid]);
 
   // Load student's exam attempt timing info for duration calculation
@@ -561,8 +570,10 @@ const CourseContent = () => {
     const result = assignmentResults[showingResultsForAssignment];
     
     if (!assignment || !result) return null;
-    const isManualPending = !!result.manualGrading && !result.gradedAt;
-    
+    const hasComputedScore = typeof result?.earnedPoints === 'number' && typeof result?.totalPoints === 'number';
+    const hasPerQuestion = !!result?.questionResults && Object.keys(result.questionResults || {}).length > 0;
+    const isManualPending = !!result.manualGrading && !(result.gradedAt || hasPerQuestion || hasComputedScore);
+
     return (
       <div className="space-y-4">
         <div className="flex items-center justify-between">
@@ -592,7 +603,7 @@ const CourseContent = () => {
             <div className="grid grid-cols-2 gap-4 mb-4">
               <div className="text-center p-3 bg-white dark:bg-gray-800 rounded-lg">
                 <div className="text-2xl font-bold text-green-600">
-                  {isManualPending ? (language === 'ar' ? 'قيد التصحيح' : 'Pending grading') : `${result.earnedPoints}/${result.totalPoints}`}
+                  {isManualPending ? (language === 'ar' ? 'قيد التصحيح' : 'Pending grading') : `${(result.earnedPoints ?? 0)}/${(result.totalPoints ?? assignment.questions?.reduce((s: number, q: any) => s + (q.points || 0), 0))}`}
                 </div>
                 <div className="text-sm text-muted-foreground">
                   {language === 'ar' ? 'النقاط' : 'Points'}
@@ -601,7 +612,7 @@ const CourseContent = () => {
               
               <div className="text-center p-3 bg-white dark:bg-gray-800 rounded-lg">
                 <div className="text-2xl font-bold text-blue-600">
-                  {isManualPending ? '__' : `${result.correctQuestions}/${result.totalQuestions}`}
+                  {isManualPending ? '__' : `${(result.correctQuestions ?? result.correct ?? 0)}/${(result.totalQuestions ?? result.total ?? (assignment.questions?.length ?? 0))}`}
                 </div>
                 <div className="text-sm text-muted-foreground">
                   {language === 'ar' ? 'الأسئلة الصحيحة' : 'Correct Questions'}
@@ -613,7 +624,7 @@ const CourseContent = () => {
               <div className="text-lg font-semibold">
                 {language === 'ar' ? 'النسبة المئوية: ' : 'Percentage: '}
                 <span className="text-green-600">
-                  {isManualPending ? '—' : `${Math.round((result.earnedPoints / result.totalPoints) * 100)}%`}
+                  {isManualPending ? '—' : `${Math.round(((result.earnedPoints ?? 0) / ((result.totalPoints ?? assignment.questions?.reduce((s: number, q: any) => s + (q.points || 0), 0)) || 1)) * 100)}%`}
                 </span>
               </div>
             </div>
@@ -636,7 +647,8 @@ const CourseContent = () => {
               </div>
             ) : (
               assignment.questions?.map((question, index) => {
-                const isCorrect = result.questionResults?.[question.id]?.isCorrect;
+                const isCorrect = result.questionResults?.[question.id]?.isCorrect === true;
+                const pointsAwarded = Number(result.questionResults?.[question.id]?.pointsAwarded ?? (isCorrect ? (question.points || 0) : 0));
                 return (
                   <div key={question.id} className={`p-3 rounded-lg border ${isCorrect ? 'bg-green-50 border-green-200 dark:bg-green-900/20 dark:border-green-800' : 'bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800'}`}>
                     <div className="flex items-start gap-3">
@@ -650,7 +662,7 @@ const CourseContent = () => {
                         </p>
                         <p className="text-sm text-muted-foreground">
                           {language === 'ar' ? 'النقاط: ' : 'Points: '}
-                          {isCorrect ? question.points : 0}/{question.points}
+                          {pointsAwarded}/{question.points}
                         </p>
                       </div>
                     </div>

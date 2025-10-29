@@ -9,7 +9,8 @@ import {
   serverTimestamp,
   Timestamp,
   limit,
-  updateDoc
+  updateDoc,
+  onSnapshot
 } from 'firebase/firestore';
 import { db } from '@/firebase/config';
 import { CourseService } from './courseService';
@@ -204,6 +205,54 @@ export default class AssignmentService {
       });
     });
     return list;
+  }
+
+  static listenAssignmentAttemptsForStudent(studentId: string, callback: (list: Array<{
+    attemptId?: string;
+    assignmentId: string;
+    courseId?: string;
+    answers?: Record<string, string>;
+    totalPoints?: number;
+    earnedPoints?: number;
+    total?: number;
+    correct?: number;
+    totalQuestions?: number;
+    correctQuestions?: number;
+    manualGrading?: boolean;
+    feedback?: string;
+    questionResults?: Record<string, any>;
+    gradedAt?: Date;
+    createdAt?: Date;
+  }>) => void): () => void {
+    const qy = query(
+      collection(db, 'assignmentAttempts'),
+      where('studentId', '==', studentId)
+    );
+    const unsubscribe = onSnapshot(qy, (snapshot) => {
+      const list: Array<{ attemptId?: string; assignmentId: string; courseId?: string; answers?: Record<string, string>; totalPoints?: number; earnedPoints?: number; total?: number; correct?: number; totalQuestions?: number; correctQuestions?: number; manualGrading?: boolean; feedback?: string; questionResults?: Record<string, any>; gradedAt?: Date; createdAt?: Date; }> = [];
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data() as any;
+        list.push({
+          attemptId: docSnap.id,
+          assignmentId: data.assignmentId,
+          courseId: data.courseId,
+          answers: data.answers,
+          totalPoints: data.totalPoints,
+          earnedPoints: data.earnedPoints,
+          total: data.total ?? data.totalQuestions,
+          correct: data.correct ?? data.correctQuestions,
+          totalQuestions: data.totalQuestions,
+          correctQuestions: data.correctQuestions,
+          manualGrading: data.manualGrading === true,
+          feedback: data.feedback,
+          questionResults: data.questionResults,
+          gradedAt: data.gradedAt?.toDate?.() || undefined,
+          createdAt: data.createdAt?.toDate?.() || new Date(),
+        });
+      });
+      callback(list);
+    });
+    return unsubscribe;
   }
 
   static gradeAssignment(assignment: AssignmentDoc, answers: Record<string, string>): { totalPoints: number; earnedPoints: number; totalQuestions: number; correctQuestions: number } {

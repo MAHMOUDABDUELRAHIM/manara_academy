@@ -56,13 +56,13 @@ export const TeacherSidebar = ({ className }: TeacherSidebarProps) => {
     },
     {
       id: 'create-course',
-      label: language === 'ar' ? 'إنشاء دورة' : 'Create Course',
+      label: language === 'ar' ? 'إنشاء كورس' : 'Create Course',
       icon: Plus,
       href: '/teacher/create-course'
     },
     {
       id: 'invite-students',
-      label: language === 'ar' ? 'دعوة الطلاب' : 'Invite Students',
+      label: language === 'ar' ? 'ادارة وتخصيص المنصة' : 'Invite Students',
       icon: UserPlus,
       href: '/teacher/invite-students'
     },

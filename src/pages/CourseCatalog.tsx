@@ -251,7 +251,7 @@ const CourseCatalog = () => {
   };
 
   const formatPrice = (price: number) => {
-    return language === 'ar' ? `${price} ر.س` : `$${price}`;
+    return language === 'ar' ? `${price} ج.م` : `${price} EGP`;
   };
 
   const clearFilters = () => {

@@ -1004,7 +1004,7 @@ const formatDuration = (ms: number) => {
                         <div className="flex justify-between text-sm text-gray-500">
                           <span>المستوى: {course.level === 'beginner' ? 'مبتدئ' : course.level === 'intermediate' ? 'متوسط' : 'متقدم'}</span>
                           <span className="font-medium text-primary">
-                            {course.price === 0 ? 'مجاني' : `${course.price} ر.س`}
+                            {course.price === 0 ? 'مجاني' : `${course.price} ج.م`}
                           </span>
                         </div>
                         <p className="text-sm text-gray-600 line-clamp-2">

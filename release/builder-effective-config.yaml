@@ -1,0 +1,19 @@
+directories:
+  output: release
+  buildResources: build
+files:
+  - filter:
+      - dist/**/*
+      - electron-main.js
+      - electron-preload.js
+      - package.json
+productName: Manara Academy
+win:
+  target: nsis
+appId: com.manara.academy
+nsis:
+  oneClick: false
+  perMachine: false
+  allowElevation: true
+  createDesktopShortcut: true
+electronVersion: 39.0.0

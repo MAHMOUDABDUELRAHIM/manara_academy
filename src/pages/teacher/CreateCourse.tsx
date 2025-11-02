@@ -14,27 +14,15 @@ import FloatingSupportChat from "@/components/FloatingSupportChat";
 import { CourseService } from "@/services/courseService";
 import { Course, Lesson } from "@/types/course";
 import { toast } from "sonner";
-import { 
-  BookOpen, 
-  Upload,
+import {
+  BookOpen,
   Plus,
-  Trash2,
-  Video,
-  FileText,
-  HelpCircle,
   Save,
   ArrowLeft,
   Image
 } from "lucide-react";
 
-interface Lesson {
-  id: string;
-  title: string;
-  type: 'video' | 'text' | 'quiz';
-  content: string; // URL for video, text content, or quiz data
-  duration?: number; // in minutes
-  order: number;
-}
+// Removed local Lesson interface since lessons UI is removed
 
 interface CourseForm {
   title: string;
@@ -46,6 +34,7 @@ interface CourseForm {
   thumbnail: File | null;
   lessons: Lesson[];
   isFree: boolean;
+  objectives?: string[];
 }
 
 export const TeacherCreateCourse = () => {
@@ -67,14 +56,11 @@ export const TeacherCreateCourse = () => {
   });
 
   const categories = [
-    { value: 'رياضيات', label: language === 'ar' ? 'رياضيات' : 'Mathematics' },
-    { value: 'فيزياء', label: language === 'ar' ? 'فيزياء' : 'Physics' },
-    { value: 'كيمياء', label: language === 'ar' ? 'كيمياء' : 'Chemistry' },
-    { value: 'أحياء', label: language === 'ar' ? 'أحياء' : 'Biology' },
-    { value: 'تاريخ', label: language === 'ar' ? 'تاريخ' : 'History' },
-    { value: 'جغرافيا', label: language === 'ar' ? 'جغرافيا' : 'Geography' },
-    { value: 'لغة عربية', label: language === 'ar' ? 'لغة عربية' : 'Arabic Language' },
-    { value: 'لغة إنجليزية', label: language === 'ar' ? 'لغة إنجليزية' : 'English Language' }
+    { value: 'ثالث اعدادي', label: language === 'ar' ? 'ثالث اعدادي' : 'Grade 9' },
+    { value: 'اولي ثانوي', label: language === 'ar' ? 'اولي ثانوي' : 'Grade 10' },
+    { value: 'بكالوريا', label: language === 'ar' ? 'بكالوريا' : 'Baccalaureate' },
+    { value: 'ثاني ثانوي', label: language === 'ar' ? 'ثاني ثانوي' : 'Grade 11' },
+    { value: 'ثالث ثانوي', label: language === 'ar' ? 'ثالث ثانوي' : 'Grade 12' }
   ];
 
   const levels = [
@@ -140,43 +126,12 @@ export const TeacherCreateCourse = () => {
     duration: '',
     thumbnail: null,
     lessons: [],
-    isFree: false
+    isFree: false,
+    objectives: ['']
   });
 
   const [isSubmitting, setIsSubmitting] = useState(false);
-
-  const addLesson = () => {
-    const newLesson: Lesson = {
-      id: Date.now().toString(),
-      title: '',
-      type: 'video',
-      content: '',
-      order: courseForm.lessons.length + 1
-    };
-    
-    setCourseForm(prev => ({
-      ...prev,
-      lessons: [...prev.lessons, newLesson]
-    }));
-  };
-
-  const removeLesson = (lessonId: string) => {
-    setCourseForm(prev => ({
-      ...prev,
-      lessons: prev.lessons.filter(lesson => lesson.id !== lessonId)
-    }));
-  };
-
-  const updateLesson = (lessonId: string, field: keyof Lesson, value: any) => {
-    setCourseForm(prev => ({
-      ...prev,
-      lessons: prev.lessons.map(lesson => 
-        lesson.id === lessonId 
-          ? { ...lesson, [field]: value }
-          : lesson
-      )
-    }));
-  };
+  // Removed lessons management functions (add/remove/update) as lessons are added on a dedicated page
 
   const handleThumbnailUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -218,13 +173,21 @@ export const TeacherCreateCourse = () => {
         return;
       }
 
+      const validObjectives = (courseForm.objectives || []).filter(o => o.trim() !== '');
+      if (validObjectives.length === 0) {
+        toast.error(language === 'ar' ? 'يرجى إدخال هدف واحد على الأقل للكورس' : 'Please enter at least one objective for the course');
+        setIsSubmitting(false);
+        return;
+      }
+
       // إعداد بيانات الدورة للحفظ
       const courseToSave: Omit<Course, 'id' | 'createdAt' | 'updatedAt'> = {
         title: courseForm.title.trim(),
         description: courseForm.description.trim(),
         category: courseForm.category,
         price: courseForm.isFree ? 0 : courseForm.price,
-        currency: 'USD',
+        currency: 'EGP',
+        objectives: validObjectives,
         level: 'beginner',
         duration: 0,
         thumbnail: '',
@@ -268,8 +231,8 @@ export const TeacherCreateCourse = () => {
           : 'Course created successfully! You can now manage it from your dashboard.'
       );
       
-      // الانتقال إلى صفحة الدورات
-      navigate('/teacher-dashboard/courses');
+      // التوجيه تلقائياً إلى صفحة إضافة درس
+      navigate(`/teacher-dashboard/courses/${courseId}/add-lesson`);
       
     } catch (error) {
       console.error('خطأ في إنشاء الدورة:', error);
@@ -283,18 +246,7 @@ export const TeacherCreateCourse = () => {
     }
   };
 
-  const getLessonTypeIcon = (type: Lesson['type']) => {
-    switch (type) {
-      case 'video':
-        return <Video className="h-4 w-4" />;
-      case 'text':
-        return <FileText className="h-4 w-4" />;
-      case 'quiz':
-        return <HelpCircle className="h-4 w-4" />;
-      default:
-        return <FileText className="h-4 w-4" />;
-    }
-  };
+  // Removed lesson type icon helper
 
   return (
     <div className="min-h-screen bg-[#f2f2f2]" dir={language === 'ar' ? 'rtl' : 'ltr'}>
@@ -414,12 +366,11 @@ export const TeacherCreateCourse = () => {
                       <SelectValue placeholder={language === 'ar' ? 'اختر التصنيف' : 'Select category'} />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="رياضيات">{language === 'ar' ? 'رياضيات' : 'Mathematics'}</SelectItem>
-                      <SelectItem value="فيزياء">{language === 'ar' ? 'فيزياء' : 'Physics'}</SelectItem>
-                      <SelectItem value="كيمياء">{language === 'ar' ? 'كيمياء' : 'Chemistry'}</SelectItem>
-                      <SelectItem value="أحياء">{language === 'ar' ? 'أحياء' : 'Biology'}</SelectItem>
-                      <SelectItem value="لغة عربية">{language === 'ar' ? 'لغة عربية' : 'Arabic Language'}</SelectItem>
-                      <SelectItem value="لغة إنجليزية">{language === 'ar' ? 'لغة إنجليزية' : 'English Language'}</SelectItem>
+                      <SelectItem value="ثالث اعدادي">{language === 'ar' ? 'ثالث اعدادي' : 'Grade 9'}</SelectItem>
+                      <SelectItem value="اولي ثانوي">{language === 'ar' ? 'اولي ثانوي' : 'Grade 10'}</SelectItem>
+                      <SelectItem value="بكالوريا">{language === 'ar' ? 'بكالوريا' : 'Baccalaureate'}</SelectItem>
+                      <SelectItem value="ثاني ثانوي">{language === 'ar' ? 'ثاني ثانوي' : 'Grade 11'}</SelectItem>
+                      <SelectItem value="ثالث ثانوي">{language === 'ar' ? 'ثالث ثانوي' : 'Grade 12'}</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -436,6 +387,41 @@ export const TeacherCreateCourse = () => {
                     className="border-gray-200 focus:border-[#2c4656] focus:ring-[#2c4656] min-h-[120px]"
                     required
                   />
+                </div>
+
+                <div className="space-y-3">
+                  <Label htmlFor="objectives" className="text-[#2c4656] font-medium">
+                    {language === 'ar' ? 'أهداف الكورس' : 'Course Objectives'} *
+                  </Label>
+                  <div className="space-y-2">
+                    {(courseForm.objectives && courseForm.objectives.length > 0 ? courseForm.objectives : ['']).map((objective, idx) => (
+                      <div key={idx} className="flex items-center gap-2">
+                        <Input
+                          id={`objective-${idx}`}
+                          value={objective}
+                          onChange={(e) => {
+                            const newObjectives = [...(courseForm.objectives || [])];
+                            newObjectives[idx] = e.target.value;
+                            setCourseForm(prev => ({ ...prev, objectives: newObjectives }));
+                          }}
+                          placeholder={language === 'ar' ? 'أدخل الهدف' : 'Enter objective'}
+                          className="border-gray-200 focus:border-[#2c4656] focus:ring-[#2c4656]"
+                          required
+                        />
+                      </div>
+                    ))}
+                  </div>
+                  <Button
+                    type="button"
+                    onClick={() => setCourseForm(prev => ({ ...prev, objectives: [...(prev.objectives || []), ''] }))}
+                    className="bg-[#ee7b3d] hover:bg-[#d66a2c] text-white"
+                  >
+                    <Plus className="h-4 w-4 mr-2" />
+                    {language === 'ar' ? 'إضافة هدف' : 'Add Objective'}
+                  </Button>
+                  <p className="text-xs text-gray-500">
+                    {language === 'ar' ? 'أدخل كل هدف في حقل مستقل' : 'Enter each objective in its own field'}
+                  </p>
                 </div>
 
                 <div className="space-y-2">
@@ -473,178 +459,7 @@ export const TeacherCreateCourse = () => {
               </CardContent>
             </Card>
 
-            {/* Course Lessons */}
-            <Card className="bg-white border-0 shadow-sm">
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <CardTitle className="flex items-center gap-2 text-[#2c4656]">
-                    <BookOpen className="h-5 w-5" />
-                    {language === 'ar' ? 'دروس الدورة' : 'Course Lessons'}
-                  </CardTitle>
-                  <Button
-                    type="button"
-                    onClick={addLesson}
-                    className="bg-[#ee7b3d] hover:bg-[#d66a2c] text-white"
-                  >
-                    <Plus className="h-4 w-4 mr-2" />
-                    {language === 'ar' ? 'إضافة درس' : 'Add Lesson'}
-                  </Button>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {courseForm.lessons.length === 0 ? (
-                  <div className="text-center py-8">
-                    <BookOpen className="h-16 w-16 text-gray-300 mx-auto mb-4" />
-                    <p className="text-gray-500">
-                      {language === 'ar' ? 'لم يتم إضافة دروس بعد' : 'No lessons added yet'}
-                    </p>
-                    <p className="text-sm text-gray-400">
-                      {language === 'ar' ? 'انقر على "إضافة درس" لبدء إنشاء المحتوى' : 'Click "Add Lesson" to start creating content'}
-                    </p>
-                  </div>
-                ) : (
-                  courseForm.lessons.map((lesson, index) => (
-                    <Card key={lesson.id} className="border border-gray-200">
-                      <CardContent className="p-4">
-                        <div className="flex items-center justify-between mb-4">
-                          <div className="flex items-center gap-2">
-                            <span className="bg-[#2c4656] text-white text-sm px-2 py-1 rounded">
-                              {index + 1}
-                            </span>
-                            <span className="text-sm text-gray-600">
-                              {language === 'ar' ? 'الدرس' : 'Lesson'} {index + 1}
-                            </span>
-                          </div>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => removeLesson(lesson.id)}
-                            className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <div className="space-y-2">
-                            <Label className="text-[#2c4656] font-medium">
-                              {language === 'ar' ? 'عنوان الدرس' : 'Lesson Title'} *
-                            </Label>
-                            <Input
-                              value={lesson.title}
-                              onChange={(e) => updateLesson(lesson.id, 'title', e.target.value)}
-                              placeholder={language === 'ar' ? 'أدخل عنوان الدرس' : 'Enter lesson title'}
-                              className="border-gray-200 focus:border-[#2c4656] focus:ring-[#2c4656]"
-                              required
-                            />
-                          </div>
-
-                          <div className="space-y-2">
-                            <Label className="text-[#2c4656] font-medium">
-                              {language === 'ar' ? 'نوع الدرس' : 'Lesson Type'} *
-                            </Label>
-                            <Select 
-                              value={lesson.type} 
-                              onValueChange={(value: 'video' | 'text' | 'quiz') => updateLesson(lesson.id, 'type', value)}
-                            >
-                              <SelectTrigger className="border-gray-200 focus:border-[#2c4656] focus:ring-[#2c4656]">
-                                <div className="flex items-center gap-2">
-                                  {getLessonTypeIcon(lesson.type)}
-                                  <SelectValue />
-                                </div>
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="video">
-                                  <div className="flex items-center gap-2">
-                                    <Video className="h-4 w-4" />
-                                    {language === 'ar' ? 'فيديو' : 'Video'}
-                                  </div>
-                                </SelectItem>
-                                <SelectItem value="text">
-                                  <div className="flex items-center gap-2">
-                                    <FileText className="h-4 w-4" />
-                                    {language === 'ar' ? 'نص' : 'Text'}
-                                  </div>
-                                </SelectItem>
-                                <SelectItem value="quiz">
-                                  <div className="flex items-center gap-2">
-                                    <HelpCircle className="h-4 w-4" />
-                                    {language === 'ar' ? 'اختبار' : 'Quiz'}
-                                  </div>
-                                </SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
-                        </div>
-
-                        <div className="mt-4 space-y-2">
-                          <Label className="text-[#2c4656] font-medium">
-                            {lesson.type === 'video' 
-                              ? (language === 'ar' ? 'رابط الفيديو أو رفع ملف' : 'Video URL or Upload File')
-                              : lesson.type === 'text'
-                              ? (language === 'ar' ? 'محتوى النص' : 'Text Content')
-                              : (language === 'ar' ? 'أسئلة الاختبار' : 'Quiz Questions')
-                            } *
-                          </Label>
-                          {lesson.type === 'video' ? (
-                            <div className="space-y-2">
-                              <Input
-                                value={lesson.content}
-                                onChange={(e) => updateLesson(lesson.id, 'content', e.target.value)}
-                                placeholder={language === 'ar' ? 'أدخل رابط الفيديو (YouTube, Vimeo, etc.)' : 'Enter video URL (YouTube, Vimeo, etc.)'}
-                                className="border-gray-200 focus:border-[#2c4656] focus:ring-[#2c4656]"
-                              />
-                              <div className="text-center text-gray-500">
-                                {language === 'ar' ? 'أو' : 'or'}
-                              </div>
-                              <div className="border-2 border-dashed border-gray-200 rounded-lg p-4 text-center">
-                                <Upload className="h-8 w-8 text-gray-400 mx-auto mb-2" />
-                                <p className="text-sm text-gray-600">
-                                  {language === 'ar' ? 'اسحب وأفلت ملف الفيديو هنا' : 'Drag and drop video file here'}
-                                </p>
-                              </div>
-                            </div>
-                          ) : lesson.type === 'text' ? (
-                            <Textarea
-                              value={lesson.content}
-                              onChange={(e) => updateLesson(lesson.id, 'content', e.target.value)}
-                              placeholder={language === 'ar' ? 'أدخل محتوى الدرس النصي' : 'Enter lesson text content'}
-                              className="border-gray-200 focus:border-[#2c4656] focus:ring-[#2c4656] min-h-[120px]"
-                            />
-                          ) : (
-                            <Textarea
-                              value={lesson.content}
-                              onChange={(e) => updateLesson(lesson.id, 'content', e.target.value)}
-                              placeholder={language === 'ar' ? 'أدخل أسئلة الاختبار (سؤال واحد في كل سطر)' : 'Enter quiz questions (one question per line)'}
-                              className="border-gray-200 focus:border-[#2c4656] focus:ring-[#2c4656] min-h-[120px]"
-                            />
-                          )}
-                        </div>
-
-                        {lesson.type === 'video' && (
-                          <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div className="space-y-2">
-                              <Label className="text-[#2c4656] font-medium">
-                                {language === 'ar' ? 'مدة الفيديو (دقيقة)' : 'Video Duration (minutes)'}
-                              </Label>
-                              <Input
-                                type="number"
-                                min="1"
-                                value={lesson.duration || ''}
-                                onChange={(e) => updateLesson(lesson.id, 'duration', parseInt(e.target.value) || undefined)}
-                                placeholder={language === 'ar' ? 'أدخل مدة الفيديو' : 'Enter video duration'}
-                                className="border-gray-200 focus:border-[#2c4656] focus:ring-[#2c4656]"
-                              />
-                            </div>
-                          </div>
-                        )}
-                      </CardContent>
-                    </Card>
-                  ))
-                )}
-              </CardContent>
-            </Card>
+            {/* تم إزالة قسم دروس الدورة وزر إضافة درس. سيتم إضافة الدروس في صفحة مستقلة */}
 
             {/* Submit Button */}
             <div className="flex justify-end gap-4">
@@ -658,7 +473,14 @@ export const TeacherCreateCourse = () => {
               </Button>
               <Button
                 type="submit"
-                disabled={isSubmitting || !courseForm.title || !courseForm.description || !courseForm.category || (!courseForm.isFree && !courseForm.price)}
+                disabled={
+                  isSubmitting ||
+                  !courseForm.title ||
+                  !courseForm.description ||
+                  !courseForm.category ||
+                  (!courseForm.isFree && !courseForm.price) ||
+                  ((courseForm.objectives || []).filter(o => o.trim() !== '').length === 0)
+                }
                 className="bg-[#ee7b3d] hover:bg-[#d66a2c] text-white px-8"
               >
                 {isSubmitting ? (
@@ -669,7 +491,7 @@ export const TeacherCreateCourse = () => {
                 ) : (
                   <>
                     <Save className="h-4 w-4 mr-2" />
-                    {language === 'ar' ? 'إنشاء الدورة' : 'Create Course'}
+                    {language === 'ar' ? 'إنشاء كورس' : 'Create Course'}
                   </>
                 )}
               </Button>

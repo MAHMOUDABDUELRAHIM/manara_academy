@@ -79,8 +79,7 @@ export const AddLesson = () => {
   const uploadVideoToBunny = async (file: File) => {
     setIsUploading(true);
     setUploadProgress(0);
-    const API_BASE = (import.meta as any).env?.VITE_API_BASE_URL || 'http://localhost:8080';
-    const endpoint = `${API_BASE}/api/upload-bunny-video`;
+    const endpoint = `/api/upload-bunny-video`;
     const form = new FormData();
     form.append('video', file);
     if (lessonData.title) form.append('title', lessonData.title);

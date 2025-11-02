@@ -13,7 +13,7 @@ const firebaseConfig = {
   apiKey: "AIzaSyAm8qT1eboC9e7qgVi2v0HpfRvIqzY-fck",
   authDomain: "manara-academy-4ec08.firebaseapp.com",
   projectId: "manara-academy-4ec08",
-  storageBucket: "manara-academy-4ec08.firebasestorage.app",
+  storageBucket: "manara-academy-4ec08.appspot.com",
   messagingSenderId: "641540215231",
   appId: "1:641540215231:web:93cb1b7af2b3f7c293110a",
   measurementId: "G-69KFVL3ZSS"

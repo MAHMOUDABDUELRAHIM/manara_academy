@@ -465,4 +465,29 @@ export class CourseService {
       throw new Error('فشل في البحث عن الدورات.');
     }
   }
+
+  /**
+   * حذف درس من الكورس بواسطة معرف الدرس
+   */
+  static async deleteLessonFromCourse(courseId: string, lessonId: string): Promise<void> {
+    try {
+      const courseRef = doc(db, this.coursesCollection, courseId);
+      const courseDoc = await getDoc(courseRef);
+      if (!courseDoc.exists()) {
+        throw new Error('الكورس غير موجود');
+      }
+      const courseData = courseDoc.data();
+      const currentLessons: any[] = courseData.lessons || [];
+      const updatedLessons = currentLessons.filter((l) => String(l.id) !== String(lessonId));
+      await updateDoc(courseRef, {
+        lessons: updatedLessons,
+        totalLessons: updatedLessons.length,
+        updatedAt: serverTimestamp()
+      });
+      console.log(`تم حذف الدرس ${lessonId} من الكورس ${courseId}`);
+    } catch (error) {
+      console.error('خطأ في حذف الدرس:', error);
+      throw new Error('فشل في حذف الدرس. يرجى المحاولة مرة أخرى.');
+    }
+  }
 }

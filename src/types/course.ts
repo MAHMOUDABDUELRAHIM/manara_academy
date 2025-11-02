@@ -53,6 +53,7 @@ export interface Course {
   prerequisites?: string[];
   learningOutcomes?: string[];
   targetAudience?: string;
+  objectives?: string[];
   
   // إعدادات الدورة
   allowComments: boolean;

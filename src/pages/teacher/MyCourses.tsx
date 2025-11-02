@@ -1,10 +1,21 @@
-﻿import { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { 
+  AlertDialog,
+  AlertDialogTrigger,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+  AlertDialogAction
+} from "@/components/ui/alert-dialog";
 // Removed upload video modal imports
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useAuthContext } from "@/contexts/AuthContext";
@@ -27,6 +38,9 @@ import {
   Eye,
   MoreVertical
 } from "lucide-react";
+import { Trash } from "lucide-react";
+import { VideoService } from "@/services/videoService";
+import { StudentService } from "@/services/studentService";
 
 interface Course {
   id: string;
@@ -64,6 +78,10 @@ const teacherName = user?.displayName || (language === 'ar' ? 'مدرس جديد
   const [editingCourse, setEditingCourse] = useState<any | null>(null);
   const [isLoadingManage, setIsLoadingManage] = useState(false);
   const [isSavingManage, setIsSavingManage] = useState(false);
+  const [deletingLessonId, setDeletingLessonId] = useState<string | null>(null);
+  const [isDeletingLesson, setIsDeletingLesson] = useState(false);
+  const [isDeletingCourse, setIsDeletingCourse] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
 
   // Ø¬Ù„Ø¨ Ø¯ÙˆØ±Ø§Øª Ø§Ù„Ù…Ø¯Ø±Ø³
   useEffect(() => {
@@ -666,6 +684,74 @@ const teacherName = user?.displayName || (language === 'ar' ? 'مدرس جديد
                         <div className="space-y-4">
                           {(editingCourse?.lessons || []).map((lesson: any, index: number) => (
                             <div key={lesson.id || index} className="border border-gray-200 rounded-md p-4">
+                              <div className="flex items-start justify-between mb-3">
+                                <div className="text-sm text-gray-600">
+                                  <span className="font-medium text-[#2c4656]">{language === 'ar' ? 'معرّف الدرس:' : 'Lesson ID:'}</span>
+                                  <span className="ml-2 text-gray-700">{lesson.id || index}</span>
+                                </div>
+                                <AlertDialog>
+                                  <AlertDialogTrigger asChild>
+                                    <Button
+                                      variant="destructive"
+                                      size="sm"
+                                      onClick={() => setDeletingLessonId(String(lesson.id || index))}
+                                    >
+                                      <Trash className="h-4 w-4 mr-2" />
+                                      {language === 'ar' ? 'حذف الدرس' : 'Delete Lesson'}
+                                    </Button>
+                                  </AlertDialogTrigger>
+                                  <AlertDialogContent>
+                                    <AlertDialogHeader>
+                                      <AlertDialogTitle>
+                                        {language === 'ar' ? 'تأكيد حذف الدرس' : 'Confirm Lesson Deletion'}
+                                      </AlertDialogTitle>
+                                      <AlertDialogDescription>
+                                        {language === 'ar'
+                                          ? 'سيتم حذف هذا الدرس نهائياً بما يشمل العنوان والوصف. إذا كان مرتبطاً بفيديو على Bunny سيتم حذف الفيديو أيضاً.'
+                                          : 'This will permanently delete the lesson including title and description. If linked to Bunny video, it will be deleted too.'}
+                                      </AlertDialogDescription>
+                                    </AlertDialogHeader>
+                                    <AlertDialogFooter>
+                                      <AlertDialogCancel>
+                                        {language === 'ar' ? 'إلغاء' : 'Cancel'}
+                                      </AlertDialogCancel>
+                                      <AlertDialogAction
+                                        onClick={async () => {
+                                          if (!editingCourseId) return;
+                                          try {
+                                            setIsDeletingLesson(true);
+                                            const target = (editingCourse?.lessons || []).find((l: any) => String(l.id || '') === String(deletingLessonId));
+                                            const guid = target?.videoUrl || '';
+                                            if (guid) {
+                                              try {
+                                                await VideoService.deleteBunnyVideo(String(guid));
+                                              } catch (e) {
+                                                // لا نوقف الحذف إذا فشل حذف الفيديو، فقط نبلغ المستخدم
+                                                console.error('Failed to delete bunny video', e);
+                                              }
+                                            }
+                                            await CourseService.deleteLessonFromCourse(editingCourseId, String(deletingLessonId));
+                                            // تحديث الحالة المحلية بعد الحذف
+                                            setEditingCourse((prev: any) => {
+                                              const lessons = (prev?.lessons || []).filter((l: any) => String(l.id || '') !== String(deletingLessonId));
+                                              return { ...(prev || {}), lessons };
+                                            });
+                                            toast.success(language === 'ar' ? 'تم حذف الدرس نهائياً' : 'Lesson deleted permanently');
+                                          } catch (err) {
+                                            console.error('Error deleting lesson', err);
+                                            toast.error(language === 'ar' ? 'فشل حذف الدرس' : 'Failed to delete lesson');
+                                          } finally {
+                                            setIsDeletingLesson(false);
+                                            setDeletingLessonId(null);
+                                          }
+                                        }}
+                                      >
+                                        {isDeletingLesson ? (language === 'ar' ? 'جارٍ الحذف...' : 'Deleting...') : (language === 'ar' ? 'تأكيد الحذف' : 'Confirm Delete')}
+                                      </AlertDialogAction>
+                                    </AlertDialogFooter>
+                                  </AlertDialogContent>
+                                </AlertDialog>
+                              </div>
                               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div>
                                   <label className="block text-sm text-gray-600 mb-1">
@@ -694,21 +780,120 @@ const teacherName = user?.displayName || (language === 'ar' ? 'مدرس جديد
                       )}
                     </div>
 
-                    <div className="flex items-center gap-3">
-                      <Button 
-                        onClick={saveCourseEdits}
-                        disabled={isSavingManage}
-                        className="bg-[#ee7b3d] hover:bg-[#d66a2c] text-white"
-                      >
-                        {isSavingManage ? (language === 'ar' ? 'جارٍ الحفظ...' : 'Saving...') : (language === 'ar' ? 'حفظ' : 'Save')}
-                      </Button>
-                      <Button 
-                        onClick={cancelManage}
-                        variant="outline"
-                        className="border-[#2c4656] text-[#2c4656] hover:bg-[#2c4656] hover:text-white"
-                      >
-                        {language === 'ar' ? 'إلغاء' : 'Cancel'}
-                      </Button>
+                    <div className="flex items-center justify-between gap-3">
+                      {/* Delete Course (opposite side) */}
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button
+                            variant="destructive"
+                            className="bg-red-600 hover:bg-red-700 text-white"
+                          >
+                            {language === 'ar' ? 'حذف الدورة' : 'Delete Course'}
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>
+                              {language === 'ar' ? 'تأكيد حذف الدورة' : 'Confirm Course Deletion'}
+                            </AlertDialogTitle>
+                            <AlertDialogDescription>
+                              {language === 'ar'
+                                ? 'اكتب اسم الدورة تماماً كما يظهر لتأكيد الحذف. سيتم حذف جميع الدروس وروابط الطلاب وأي فيديوهات في Bunny.'
+                                : 'Type the course name exactly as shown to confirm deletion. All lessons, student enrollments, and Bunny videos will be removed.'}
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <div className="space-y-2">
+                            <label className="block text-sm text-gray-600">
+                              {language === 'ar' ? 'اسم الدورة' : 'Course Name'}
+                            </label>
+                            <Input
+                              value={deleteConfirmText}
+                              onChange={(e) => setDeleteConfirmText(e.target.value)}
+                              placeholder={editingCourse?.title || ''}
+                            />
+                          </div>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>
+                              {language === 'ar' ? 'إلغاء' : 'Cancel'}
+                            </AlertDialogCancel>
+                            <AlertDialogAction
+                              onClick={async () => {
+                                if (!editingCourseId || !editingCourse) return;
+                                const required = String(editingCourse.title || '').trim();
+                                const typed = String(deleteConfirmText || '').trim();
+                                if (!required || typed !== required) {
+                                  toast.error(language === 'ar' ? 'يرجى كتابة اسم الدورة بشكل مطابق' : 'Please type the exact course name');
+                                  return;
+                                }
+                                try {
+                                  setIsDeletingCourse(true);
+                                  // 1) حذف فيديوهات Bunny المرتبطة بالدروس
+                                  const lessons = (editingCourse?.lessons || []) as any[];
+                                  const guids = lessons.map(l => String(l?.videoUrl || '').trim()).filter(Boolean);
+                                  if (guids.length > 0) {
+                                    await Promise.allSettled(guids.map(guid => VideoService.deleteBunnyVideo(guid)));
+                                  }
+
+                                  // 2) إزالة الدورة من الطلاب المرتبطين بالمدرس
+                                  const teacherId = user?.uid;
+                                  if (teacherId) {
+                                    try {
+                                      const students = await StudentService.getStudentsByTeacher(teacherId);
+                                      const unenrollOps: Promise<any>[] = [];
+                                      for (const s of students) {
+                                        const enrolled = (s as any)?.enrolledCourses || [];
+                                        if (Array.isArray(enrolled) && enrolled.includes(editingCourseId)) {
+                                          unenrollOps.push(StudentService.unenrollFromCourse(s.id, editingCourseId));
+                                        }
+                                      }
+                                      if (unenrollOps.length > 0) {
+                                        await Promise.allSettled(unenrollOps);
+                                      }
+                                    } catch (e) {
+                                      console.warn('Failed to unenroll some students from course', e);
+                                    }
+                                  }
+
+                                  // 3) حذف الدورة نفسها من Firestore
+                                  await CourseService.deleteCourse(editingCourseId);
+
+                                  // 4) تحديث الحالة وإغلاق جلسة الإدارة
+                                  setCourses(prev => prev.filter(c => c.id !== editingCourseId));
+                                  setEditingCourseId(null);
+                                  setEditingCourse(null);
+                                  setDeleteConfirmText('');
+                                  toast.success(language === 'ar' ? 'تم حذف الدورة نهائياً' : 'Course deleted permanently');
+                                } catch (err) {
+                                  console.error('Error deleting course', err);
+                                  toast.error(language === 'ar' ? 'فشل حذف الدورة' : 'Failed to delete course');
+                                } finally {
+                                  setIsDeletingCourse(false);
+                                }
+                              }}
+                            >
+                              {isDeletingCourse ? (language === 'ar' ? 'جارٍ الحذف...' : 'Deleting...') : (language === 'ar' ? 'تأكيد الحذف' : 'Confirm Delete')}
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+
+                      {/* Save/Cancel group (other side) */}
+                      <div className="flex items-center gap-3">
+                        <Button 
+                          onClick={saveCourseEdits}
+                          disabled={isSavingManage}
+                          className="bg-[#ee7b3d] hover:bg-[#d66a2c] text-white"
+                        >
+                          {isSavingManage ? (language === 'ar' ? 'جارٍ الحفظ...' : 'Saving...') : (language === 'ar' ? 'حفظ' : 'Save')}
+                        </Button>
+                        <Button 
+                          onClick={cancelManage}
+                          variant="outline"
+                          className="border-[#2c4656] text-[#2c4656] hover:bg-[#2c4656] hover:text-white"
+                        >
+                          {language === 'ar' ? 'إلغاء' : 'Cancel'}
+                        </Button>
+                      </div>
                     </div>
                   </>
                 )}

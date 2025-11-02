@@ -170,7 +170,7 @@ const CourseDetails = () => {
   };
 
   const formatPrice = (price: number) => {
-    return language === 'ar' ? `${price} ر.س` : `$${price}`;
+    return language === 'ar' ? `${price} ج.م` : `${price} EGP`;
   };
 
   const getLevelBadge = (level: string) => {
@@ -428,7 +428,7 @@ const CourseDetails = () => {
                     <ul className="list-disc pl-6 space-y-2 text-gray-700 dark:text-gray-300">
                       {course.objectives && course.objectives.length ? (
                         course.objectives.map((objective, idx) => (
-                          <li key={idx}>{language === 'ar' ? objective.titleAr || objective.title : objective.title}</li>
+                          <li key={idx}>{typeof objective === 'string' ? objective : (language === 'ar' ? (objective as any).titleAr || (objective as any).title : (objective as any).title)}</li>
                         ))
                       ) : (
                         <li>{language === 'ar' ? 'لا توجد أهداف محددة' : 'No specific objectives listed'}</li>

@@ -663,7 +663,7 @@ export const TeacherDashboard = () => {
                                 {getStatusBadge(course.status).label}
                               </Badge>
                               <span className="text-sm text-muted-foreground">
-                                {course.price} {language === 'ar' ? 'ريال' : 'SAR'}
+                                {course.price} {language === 'ar' ? 'ج.م' : 'EGP'}
                               </span>
                             </div>
                           </div>

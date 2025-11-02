@@ -1002,9 +1002,8 @@ if (hasEnded || hasResult) {
                           const hasEnded = !!(endAtMs && nowMs >= endAtMs);
                           const hasResult = !!examResults[item.id];
                           return (
-                            <>
+                            <React.Fragment key={`${item.type}-${item.id}`}>
                               <button
-                                key={`${item.type}-${item.id}`}
                                 onClick={() => {
                                   setSelectedItem({ type: item.type, id: item.id });
                                   // If assignment already submitted, immediately show results view
@@ -1066,7 +1065,7 @@ if (hasEnded || hasResult) {
                                 )}
                               </button>
 
-                            </>
+                            </React.Fragment>
                           );
                         })}
                       </div>

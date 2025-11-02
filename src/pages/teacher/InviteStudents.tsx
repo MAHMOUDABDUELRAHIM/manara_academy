@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { useLanguage } from '@/contexts/LanguageContext';
 import DashboardHeader from '@/components/DashboardHeader';
@@ -52,6 +52,79 @@ export default function InviteStudents() {
   const [selectedTheme, setSelectedTheme] = useState<'proA' | 'proB'>('proA');
   const [isSavingTheme, setIsSavingTheme] = useState(false);
 
+  // Branding settings state
+  const [platformName, setPlatformName] = useState('');
+  const [platformLogoBase64, setPlatformLogoBase64] = useState('');
+  const [isUploadingLogo, setIsUploadingLogo] = useState(false);
+  const [isSavingBrand, setIsSavingBrand] = useState(false);
+  const logoInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Helper: compress image to reduce size and dimensions
+  const compressImage = async (
+    file: File,
+    maxWidth = 512,
+    maxHeight = 512,
+    initialQuality = 0.82
+  ): Promise<{ blob: Blob; type: string }> => {
+    try {
+      const bitmap = await createImageBitmap(file);
+      const { width, height } = bitmap;
+      const scale = Math.min(maxWidth / width, maxHeight / height, 1);
+      const targetWidth = Math.round(width * scale);
+      const targetHeight = Math.round(height * scale);
+
+      const canvas = document.createElement('canvas');
+      canvas.width = targetWidth;
+      canvas.height = targetHeight;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('Canvas not supported');
+      ctx.drawImage(bitmap, 0, 0, targetWidth, targetHeight);
+
+      // Prefer WEBP to preserve transparency and better compression
+      let quality = initialQuality;
+      let blob: Blob | null = await new Promise((resolve) =>
+        canvas.toBlob((b) => resolve(b), 'image/webp', quality)
+      );
+
+      // Fallback if WEBP not produced
+      if (!blob) {
+        blob = await new Promise((resolve) =>
+          canvas.toBlob((b) => resolve(b), 'image/png')
+        );
+      }
+
+      // Iteratively reduce quality if size is still too large (> ~600KB)
+      const maxSizeBytes = 600_000;
+      while (blob && blob.size > maxSizeBytes && quality > 0.5) {
+        quality -= 0.1;
+        blob = await new Promise((resolve) =>
+          canvas.toBlob((b) => resolve(b), 'image/webp', quality)
+        );
+      }
+
+      if (!blob) throw new Error('Failed to create blob from canvas');
+      const type = blob.type || 'image/webp';
+      return { blob, type };
+    } catch (error) {
+      console.error('Image compression error:', error);
+      // If compression fails, upload the original file
+      return { blob: file, type: file.type || 'application/octet-stream' };
+    }
+  };
+
+  // Helper: convert Blob to Base64 Data URL
+  const blobToDataURL = (blob: Blob): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const result = reader.result as string;
+        resolve(result);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  };
+
   // Check email verification status with real-time updates
   useEffect(() => {
     if (!user) return;
@@ -100,8 +173,7 @@ export default function InviteStudents() {
 
     checkFirestoreVerification();
     loadInvitationCode();
-    // Replace old dashboard settings loader with theme loader
-    loadTheme();
+    loadBrandSettings();
     loadStudents();
 
     return () => unsubscribe();
@@ -207,6 +279,74 @@ export default function InviteStudents() {
       toast.error(language === 'ar' ? 'فشل في حفظ الثيم' : 'Failed to save theme');
     } finally {
       setIsSavingTheme(false);
+    }
+  };
+
+  // Load branding (platform name and logo) from Firestore
+  const loadBrandSettings = async () => {
+    if (!user) return;
+    try {
+      const settingsDoc = await getDoc(doc(db, 'teacherSettings', user.uid));
+      if (settingsDoc.exists()) {
+        const data = settingsDoc.data();
+        setPlatformName(
+          (data.platformName as string) ||
+            (user.displayName ? `منصة ${user.displayName}` : 'منصتي')
+        );
+        setPlatformLogoBase64((data.platformLogoBase64 as string) || '');
+      } else {
+        setPlatformName(user?.displayName ? `منصة ${user.displayName}` : 'منصتي');
+      }
+    } catch (error) {
+      console.error('خطأ في تحميل إعدادات العلامة التجارية:', error);
+    }
+  };
+
+  // Upload logo: compress and store Base64 directly in Firestore
+  const handleLogoUpload = async (file: File) => {
+    if (!user || !file) return;
+    try {
+      setIsUploadingLogo(true);
+      // Basic validation
+      if (!file.type.startsWith('image/')) {
+        toast.error(language === 'ar' ? 'الملف المختار ليس صورة' : 'Selected file is not an image');
+        return;
+      }
+
+      // Compress image and convert to Base64 Data URL
+      const { blob } = await compressImage(file);
+      const dataUrl = await blobToDataURL(blob);
+      setPlatformLogoBase64(dataUrl);
+      await setDoc(
+        doc(db, 'teacherSettings', user.uid),
+        { platformLogoBase64: dataUrl, updatedAt: new Date() },
+        { merge: true }
+      );
+      toast.success(language === 'ar' ? 'تم حفظ الشعار في Firestore' : 'Logo saved to Firestore');
+    } catch (error) {
+      console.error('خطأ في رفع الشعار:', error);
+      toast.error(language === 'ar' ? 'فشل في حفظ الشعار' : 'Failed to save logo');
+    } finally {
+      setIsUploadingLogo(false);
+    }
+  };
+
+  // Save platform name to Firestore
+  const saveBrandSettings = async () => {
+    if (!user) return;
+    try {
+      setIsSavingBrand(true);
+      await setDoc(
+        doc(db, 'teacherSettings', user.uid),
+        { platformName, platformLogoBase64, updatedAt: new Date() },
+        { merge: true }
+      );
+      toast.success(language === 'ar' ? 'تم حفظ إعدادات المنصة' : 'Platform settings saved');
+    } catch (error) {
+      console.error('خطأ في حفظ إعدادات المنصة:', error);
+      toast.error(language === 'ar' ? 'فشل في حفظ إعدادات المنصة' : 'Failed to save platform settings');
+    } finally {
+      setIsSavingBrand(false);
     }
   };
 
@@ -409,8 +549,8 @@ export default function InviteStudents() {
                 </h1>
                 <p className="text-gray-600">
                   {language === 'ar' 
-                    ? 'قم بدعوة الطلاب واختر ثيم لوحة الطالب' 
-                    : 'Invite students and choose the student dashboard theme'
+                    ? 'قم بإدارة وتخصيص منصتك: الشعار واسم المنصة' 
+                    : 'Manage and customize your platform: logo and name'
                   }
                 </p>
               </div>
@@ -436,167 +576,82 @@ export default function InviteStudents() {
             {/* Main Content with Disabled Effect */}
             <div className={!isEmailVerified ? 'opacity-50 pointer-events-none select-none' : ''}>
               
-              {/* Invitation Code Section */}
+              {/* Invitation Code Section has been removed as requested */}
+
+              {/* Platform Branding Section */}
               <Card className="bg-white border-0 shadow-sm">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
-                    <Copy className="h-5 w-5 text-[#2c4656]" />
-                    {language === 'ar' ? 'رمز الدعوة' : 'Invitation Code'}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div>
-                    <Label className="text-sm font-medium">
-                      {language === 'ar' ? 'رابط الدعوة الخاص بك' : 'Your Invitation Link'}
-                    </Label>
-                    
-                    {/* Enhanced Link Display Section */}
-                    <div className="mt-3 p-4 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg border border-blue-200">
-                      <div className="flex items-center justify-between">
-                        <div className="flex-1">
-                          <p className="text-xs text-gray-600 mb-1">
-                            {language === 'ar' ? 'رابط دعوة الطلاب' : 'Student Invitation Link'}
-                          </p>
-                          <div className="flex items-center gap-3">
-                            <span className="text-sm font-mono text-blue-700 bg-white px-3 py-2 rounded border break-all">
-                              {`${window.location.origin}/invite/${user?.uid}`}
-                            </span>
-                            <Button
-                              onClick={() => {
-                                const inviteLink = `${window.location.origin}/invite/${user?.uid}`;
-                                navigator.clipboard.writeText(inviteLink);
-                                setCopiedCode(true);
-                                setTimeout(() => setCopiedCode(false), 2000);
-                                toast.success(language === 'ar' ? 'تم نسخ الرابط' : 'Link copied');
-                              }}
-                              variant="outline"
-                              size="sm"
-                              className={`transition-all duration-200 ${
-                                copiedCode 
-                                  ? 'bg-green-100 border-green-300 text-green-700 hover:bg-green-100' 
-                                  : 'border-blue-300 text-blue-700 hover:bg-blue-100'
-                              }`}
-                            >
-                              {copiedCode ? (
-                                <Check className="h-4 w-4" />
-                              ) : (
-                                <Copy className="h-4 w-4" />
-                              )}
-                            </Button>
-                          </div>
-                        </div>
-                      </div>
-                      <p className="text-xs text-blue-600 mt-2">
-                        {language === 'ar' 
-                          ? 'شارك هذا الرابط مع الطلاب للانضمام إلى دوراتك مباشرة'
-                          : 'Share this link with students to join your courses directly'
-                        }
-                      </p>
-                    </div>
-
-                    {/* Custom Code Input Section */}
-                    {!isCustomCodeMode ? (
-                      <Button 
-                        onClick={() => setIsCustomCodeMode(true)}
-                        variant="outline"
-                        size="sm"
-                        className="mt-3 border-[#ee7b3d] text-[#ee7b3d] hover:bg-[#ee7b3d] hover:text-white"
-                      >
-                        <Edit className="h-4 w-4 mr-2" />
-                        {language === 'ar' ? 'تخصيص الرمز' : 'Customize Code'}
-                      </Button>
-                    ) : (
-                      <div className="mt-3 space-y-2">
-                        <div className="flex items-center gap-2">
-                          <Input 
-                            value={customCode}
-                            onChange={(e) => setCustomCode(e.target.value.toUpperCase())}
-                            placeholder={language === 'ar' ? 'أدخل رمز مخصص (6 أحرف)' : 'Enter custom code (6 chars)'}
-                            maxLength={6}
-                            className="font-mono text-center"
-                          />
-                          <Button 
-                            onClick={saveCustomCode}
-                            size="sm"
-                            className="bg-[#ee7b3d] hover:bg-[#ee7b3d]/90 text-white"
-                          >
-                            <Check className="h-4 w-4" />
-                          </Button>
-                          <Button 
-                            onClick={() => {
-                              setIsCustomCodeMode(false);
-                              setCustomCode('');
-                            }}
-                            variant="outline"
-                            size="sm"
-                          >
-                            <X className="h-4 w-4" />
-                          </Button>
-                        </div>
-                        <p className="text-xs text-gray-500">
-                          {language === 'ar' 
-                            ? 'يجب أن يكون الرمز 6 أحرف أو أرقام باللغة الإنجليزية'
-                            : 'Code must be 6 alphanumeric characters'
-                          }
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                  <p className="text-sm text-gray-600">
-                    {language === 'ar' 
-                      ? 'شارك هذا الرمز مع الطلاب ليتمكنوا من التسجيل في دوراتك'
-                      : 'Share this code with students so they can register for your courses'
-                    }
-                  </p>
-                </CardContent>
-              </Card>
-
-              {/* Theme Selection Section */}
-              <Card className="bg-white border-0 shadow-sm">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Palette className="h-5 w-5 text-[#2c4656]" />
-                    {language === 'ar' ? 'اختيار ثيم لوحة الطالب' : 'Student Dashboard Theme'}
+                    <Edit className="h-5 w-5 text-[#2c4656]" />
+                    {language === 'ar' ? 'إدارة وتخصيص المنصة' : 'Platform Management and Customization'}
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-6">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div className={`border rounded-lg p-4 transition-all ${selectedTheme === 'proA' ? 'ring-2 ring-blue-600' : 'hover:border-blue-300'}`}>
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <h3 className="font-bold text-lg">{language === 'ar' ? 'ثيم احترافي A' : 'Professional Theme A'}</h3>
-                          <p className="text-sm text-gray-600">
-                            {language === 'ar' ? 'تصميم حديث بأيقونات واضحة وتنظيم مباشر' : 'Modern layout with clear icons and direct organization'}
-                          </p>
-                        </div>
-                        {selectedTheme === 'proA' && <Badge className="bg-blue-600 text-white">{language === 'ar' ? 'محدد' : 'Selected'}</Badge>}
-                      </div>
-                      <div className="mt-4 flex items-center gap-3">
-                        <Button disabled={isSavingTheme} className="bg-[#2c4656] hover:bg-[#1e3240]" onClick={() => saveTheme('proA')}>
-                          {isSavingTheme ? (language === 'ar' ? 'جاري الحفظ...' : 'Saving...') : (language === 'ar' ? 'اختر هذا الثيم' : 'Choose this theme')}
-                        </Button>
-                      </div>
+                  {/* Logo upload and preview */}
+                  <div className="flex items-center gap-4">
+                    <div className="w-16 h-16 rounded-lg border border-gray-200 bg-gray-50 flex items-center justify-center overflow-hidden">
+                      {platformLogoBase64 ? (
+                        <img src={platformLogoBase64} alt="شعار المنصة" className="w-full h-full object-cover" />
+                      ) : (
+                        <span className="text-gray-500 text-xs">{language === 'ar' ? 'لا يوجد شعار' : 'No logo'}</span>
+                      )}
                     </div>
+                    <div>
+                      <input
+                        id="logo-input"
+                        ref={logoInputRef}
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          if (file) await handleLogoUpload(file);
+                          // Clear value to allow re-uploading the same file and retrigger onChange
+                          e.currentTarget.value = '';
+                        }}
+                      />
+                      <Button
+                        disabled={isUploadingLogo}
+                        className="bg-[#2c4656] hover:bg-[#1e3240]"
+                        onClick={() => logoInputRef.current?.click()}
+                      >
+                        {isUploadingLogo
+                          ? (language === 'ar' ? 'جاري الرفع...' : 'Uploading...')
+                          : (language === 'ar' ? 'إضافة/تحديث الشعار' : 'Add/Update Logo')}
+                      </Button>
+                    </div>
+                  </div>
 
-                    <div className={`border rounded-lg p-4 transition-all ${selectedTheme === 'proB' ? 'ring-2 ring-purple-600' : 'hover:border-purple-300'}`}>
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <h3 className="font-bold text-lg">{language === 'ar' ? 'ثيم احترافي B' : 'Professional Theme B'}</h3>
-                          <p className="text-sm text-gray-600">
-                            {language === 'ar' ? 'ثيم عصري بألوان متدرجة وترتيب الأقسام بأسلوب أنيق' : 'Contemporary theme with gradients and elegant section order'}
-                          </p>
-                        </div>
-                        {selectedTheme === 'proB' && <Badge className="bg-purple-600 text-white">{language === 'ar' ? 'محدد' : 'Selected'}</Badge>}
-                      </div>
-                      <div className="mt-4 flex items-center gap-3">
-                        <Button disabled={isSavingTheme} className="bg-purple-600 hover:bg-purple-700" onClick={() => saveTheme('proB')}>
-                          {isSavingTheme ? (language === 'ar' ? 'جاري الحفظ...' : 'Saving...') : (language === 'ar' ? 'اختر هذا الثيم' : 'Choose this theme')}
-                        </Button>
-                      </div>
+                  {/* Platform name input */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
+                    <div>
+                      <Label htmlFor="platformName">
+                        {language === 'ar' ? 'اسم المنصة' : 'Platform Name'}
+                      </Label>
+                      <Input
+                        id="platformName"
+                        value={platformName}
+                        onChange={(e) => setPlatformName(e.target.value)}
+                        placeholder={language === 'ar' ? 'أدخل اسم منصتك' : 'Enter your platform name'}
+                        className="mt-2"
+                      />
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        disabled={isSavingBrand}
+                        className="bg-[#2c4656] hover:bg-[#1e3240]"
+                        onClick={saveBrandSettings}
+                      >
+                        {isSavingBrand
+                          ? (language === 'ar' ? 'جاري الحفظ...' : 'Saving...')
+                          : (language === 'ar' ? 'حفظ الإعدادات' : 'Save Settings')}
+                      </Button>
                     </div>
                   </div>
                   <p className="text-xs text-gray-500">
-                    {language === 'ar' ? 'اختيار الثيم يؤثر على لوحة الطالب التابعة لك فقط' : 'Theme selection affects only your students’ dashboard'}
+                    {language === 'ar'
+                      ? 'سيتم تطبيق اسم المنصة والشعار على واجهات الطلاب ذات الصلة.'
+                      : 'Platform name and logo will apply to relevant student interfaces.'}
                   </p>
                 </CardContent>
               </Card>

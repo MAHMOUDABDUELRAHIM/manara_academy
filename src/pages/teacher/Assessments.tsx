@@ -75,6 +75,7 @@ type AssignmentDraft = {
   courseId: string | null;
   questions: AssignmentQuestion[];
   manualGradingEnabled?: boolean;
+  availabilityDays?: number | null;
 };
 
 const TeacherAssessments: React.FC = () => {
@@ -125,7 +126,7 @@ const TeacherAssessments: React.FC = () => {
       manualGradingEnabled: false,
     }
   });
-  const [assignment, setAssignment] = useState<AssignmentDraft>({ title: '', courseId: null, questions: [], manualGradingEnabled: false });
+  const [assignment, setAssignment] = useState<AssignmentDraft>({ title: '', courseId: null, questions: [], manualGradingEnabled: false, availabilityDays: null });
   const [draggingImageQid, setDraggingImageQid] = useState<string | null>(null);
   const [dragOffset, setDragOffset] = useState<{ x: number; y: number } | null>(null);
 
@@ -1675,6 +1676,7 @@ if (courseIdForExam) {
         instructorId: user?.uid || '',
         questions: sanitized as any,
         manualGradingEnabled: assignment.manualGradingEnabled === true,
+        availabilityDays: assignment.manualGradingEnabled ? (assignment.availabilityDays ?? null) : null,
       });
       // Ø¥Ø±Ø³Ø§Ù„ Ø¥Ø´Ø¹Ø§Ø± Ù„Ù„Ø·Ù„Ø§Ø¨ Ø§Ù„Ù…Ø³Ø¬Ù„ÙŠÙ† ÙÙŠ Ø§Ù„Ø¯ÙˆØ±Ø© Ø§Ù„Ù…Ø­Ø¯Ø¯Ø©
       try {
@@ -1707,7 +1709,7 @@ if (courseIdForExam) {
         toast.success(language === 'ar' ? 'تم نشر الواجب (تعذر إرسال الإشعارات)' : 'Assignment published (notifications failed)');
       }
       // Ø¥Ø¹Ø§Ø¯Ø© ØªØ¹ÙŠÙŠÙ† Ø§Ù„Ù†Ù…ÙˆØ°Ø¬
-      setAssignment({ title: '', courseId: null, questions: [] });
+      setAssignment({ title: '', courseId: null, questions: [], manualGradingEnabled: false, availabilityDays: null });
     } catch (e) {
       console.error('saveAssignment failed', e);
       toast.error(language === 'ar' ? 'تعذر حفظ الواجب' : 'Failed to save assignment');
@@ -2296,6 +2298,22 @@ if (courseIdForExam) {
                         <Checkbox id="assignment-manual" checked={assignment.manualGradingEnabled === true} onCheckedChange={(v) => setAssignment(prev => ({ ...prev, manualGradingEnabled: !!v }))} />
                         <label htmlFor="assignment-manual" className="text-sm cursor-pointer">{language === 'ar' ? 'تمكين التصحيح اليدوي (اختياري)' : 'Enable manual grading (optional)'}</label>
                       </div>
+                      {assignment.manualGradingEnabled ? (
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+                          <div>
+                            <label className="text-sm font-medium mb-1 block">{language === 'ar' ? 'مدة إتاحة الواجب (بالأيام)' : 'Availability duration (days)'}</label>
+                            <input
+                              type="number"
+                              min={1}
+                              className="w-full border rounded h-10 px-3"
+                              value={assignment.availabilityDays ?? ''}
+                              onChange={(e) => setAssignment(prev => ({ ...prev, availabilityDays: e.target.value ? Math.max(1, Number(e.target.value)) : null }))}
+                              placeholder={language === 'ar' ? 'مثال: 2' : 'e.g. 2'}
+                            />
+                            <p className="text-xs text-muted-foreground mt-1">{language === 'ar' ? 'ينتهي الساعة 11:59 مساءً في آخر يوم' : 'Ends at 11:59 PM on the last day'}</p>
+                          </div>
+                        </div>
+                      ) : null}
                       <div className="space-y-3">
                         <div className="flex items-center justify-between">
                           <div className="font-medium">{language === 'ar' ? 'أسئلة الواجب' : 'Assignment Questions'}</div>
@@ -2359,7 +2377,7 @@ if (courseIdForExam) {
                         )}
                       </div>
                       <div className="flex items-center justify-end gap-2">
-                        <Button variant="secondary" onClick={() => setAssignment({ title: '', courseId: null, questions: [], manualGradingEnabled: assignment.manualGradingEnabled })}>{language === 'ar' ? 'إعادة تعيين' : 'Reset'}</Button>
+                        <Button variant="secondary" onClick={() => setAssignment({ title: '', courseId: null, questions: [], manualGradingEnabled: false, availabilityDays: null })}>{language === 'ar' ? 'إعادة تعيين' : 'Reset'}</Button>
                         <Button onClick={saveAssignment}>{assignment.manualGradingEnabled ? (language === 'ar' ? 'نشر الواجب' : 'Publish Assignment') : t.saveAssignment}</Button>
                       </div>
                     </CardContent>

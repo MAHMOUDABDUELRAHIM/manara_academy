@@ -64,6 +64,8 @@ export interface AssignmentDoc {
   questions: AssignmentQuestion[];
   isPublished: boolean;
   manualGradingEnabled?: boolean;
+  availabilityDays?: number | null; // optional window length in days (for manual grading)
+  windowEndAt?: Timestamp | Date | null; // absolute end time at 23:59:59 of the last day
   createdAt: Timestamp | Date;
 }
 
@@ -76,14 +78,28 @@ export default class AssignmentService {
     instructorId: string;
     questions: AssignmentQuestion[];
     manualGradingEnabled?: boolean;
+    availabilityDays?: number | null;
   }): Promise<string> {
-    const { title, courseId, instructorId, questions, manualGradingEnabled } = params;
+    const { title, courseId, instructorId, questions, manualGradingEnabled, availabilityDays } = params;
     if (!title || !courseId || !instructorId) throw new Error('Missing required fields for assignment creation');
 
     let courseTitle: string | undefined;
     try {
       const course = await CourseService.getCourseById(courseId);
       courseTitle = course?.title || course?.titleAr || undefined;
+    } catch {}
+
+    // Compute window end at publish time if availabilityDays is provided
+    let windowEndAt: Date | null = null;
+    try {
+      if (manualGradingEnabled && typeof availabilityDays === 'number' && availabilityDays > 0) {
+        const now = new Date();
+        const end = new Date(now);
+        end.setDate(now.getDate() + availabilityDays);
+        // Set to end of day 23:59:59 local
+        end.setHours(23, 59, 59, 999);
+        windowEndAt = end;
+      }
     } catch {}
 
     const payload: Omit<AssignmentDoc, 'id'> = {
@@ -94,6 +110,8 @@ export default class AssignmentService {
       questions: stripUndefinedDeep(questions) as AssignmentQuestion[],
       isPublished: true,
       manualGradingEnabled: manualGradingEnabled === true,
+      availabilityDays: manualGradingEnabled ? (availabilityDays ?? null) : null,
+      windowEndAt: manualGradingEnabled ? (windowEndAt || null) : null,
       createdAt: serverTimestamp(),
     };
 

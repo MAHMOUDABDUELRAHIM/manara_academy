@@ -1302,7 +1302,7 @@ const formatDuration = (ms: number) => {
                                     </div>
                                     <div className="p-3 bg-emerald-50 rounded border border-emerald-100">
                                       <div className="text-xs text-emerald-700">حالة التصحيح</div>
-                                      <div className="mt-1 text-base font-semibold text-emerald-900">{res.gradedAt ? 'مصحّح' : 'قيد التصحيح'}</div>
+                                      <div className="mt-1 text-base font-semibold text-emerald-900">{(res.gradedAt || (res.questionResults && Object.keys(res.questionResults).length > 0) || (typeof res.earnedPoints === 'number' && typeof res.totalPoints === 'number')) ? 'مصحّح' : 'قيد التصحيح'}</div>
                                     </div>
                                   </div>
                                   {res.feedback ? (
@@ -1374,14 +1374,24 @@ const formatDuration = (ms: number) => {
                         </div>
                         {/* عرض الأسئلة والإجابات */}
                         <div className="space-y-3">
-                          {((assignmentMeta[selectedAssignmentResult.assignmentId]?.questions) || []).map((q: any, idx: number) => {
+                          {(() => {
+                            const manual = (assignmentMeta[selectedAssignmentResult.assignmentId]?.manualGradingEnabled) || (selectedAssignmentResult as any)?.manualGrading === true;
+                            const pendingManual = manual && !(selectedAssignmentResult as any)?.gradedAt;
+                            if (pendingManual) {
+                              return (
+                                <div className="p-3 rounded-lg border bg-yellow-50 border-yellow-200 dark:bg-yellow-900/20 dark:border-yellow-800 text-sm text-muted-foreground">
+                                  {language === 'ar'
+                                    ? 'تم إرسال الواجب للتصحيح. ستظهر التفاصيل بعد نشر الدرجة.'
+                                    : 'Assignment submitted for manual grading. Details will appear after publishing.'}
+                                </div>
+                              );
+                            }
+                            return (assignmentMeta[selectedAssignmentResult.assignmentId]?.questions || []).map((q: any, idx: number) => {
                             const yourAns = selectedAssignmentResult.answers?.[q.id];
                             let yourText = '';
                             let correctText = '';
                             let isCorrect: boolean | null = null;
-                            const manual = (assignmentMeta[selectedAssignmentResult.assignmentId]?.manualGradingEnabled) || (selectedAssignmentResult as any)?.manualGrading === true;
-                            const pendingManual = manual && !(selectedAssignmentResult as any)?.gradedAt;
-                            const showCorrectness = pendingManual ? false : true;
+                            const showCorrectness = true;
                             if (q.type === 'mcq') {
                               const selected = (q.options || []).find((o: any) => o.id === yourAns);
                               yourText = selected ? selected.text : '—';
@@ -1436,7 +1446,8 @@ const formatDuration = (ms: number) => {
                                 </div>
                               </div>
                             );
-                          })}
+                            });
+                          })()}
                         </div>
                       </div>
                     </CardContent>

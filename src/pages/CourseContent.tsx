@@ -474,6 +474,30 @@ const CourseContent = () => {
         {language === 'ar' ? 'لم يتم العثور على الواجب' : 'Assignment not found'}
       </div>
     );
+    // If manual grading with availability window has ended, block entry
+    if (asg.manualGradingEnabled) {
+      const now = Date.now();
+      let endAtMs: number | null = null;
+      if (asg.windowEndAt) {
+        try { endAtMs = new Date(asg.windowEndAt as any).getTime(); } catch {}
+      }
+      if (!endAtMs && asg.availabilityDays) {
+        try {
+          const created = asg.createdAt ? new Date(asg.createdAt as any) : new Date();
+          const end = new Date(created);
+          end.setDate(created.getDate() + (asg.availabilityDays as number));
+          end.setHours(23, 59, 59, 999);
+          endAtMs = end.getTime();
+        } catch {}
+      }
+      if (endAtMs && now > endAtMs) {
+        return (
+          <div className="p-4 rounded-lg border bg-yellow-50 border-yellow-200 dark:bg-yellow-900/20 dark:border-yellow-800">
+            {language === 'ar' ? 'انتهت مدة تسليم الواجب. لا يمكنك الدخول إلى الواجب بعد الآن.' : 'The assignment submission window has ended. You can no longer access this assignment.'}
+          </div>
+        );
+      }
+    }
     // If there's an existing attempt for this assignment, do not show the questions again
     if (assignmentResults[asg.id!]) return null;
     return (
@@ -997,6 +1021,42 @@ if (hasEnded || hasResult) {
                                 <div className="flex-1">
                                   <p className="font-medium">{item.title}</p>
                                   {item.subtitle && <p className="text-xs text-muted-foreground">{item.subtitle}</p>}
+                                  {/* عرض موعد آخر تسليم إذا كان واجباً وله مدة */}
+                                  {item.type === 'assignment' && (() => {
+                                    const asg = assignments.find(a => a.id === item.id);
+                                    if (asg && (asg.windowEndAt || (asg.createdAt && asg.availabilityDays))) {
+                                      let endAt = null;
+                                      if (asg.windowEndAt) {
+                                        try { endAt = new Date(asg.windowEndAt as any); } catch {}
+                                      } else if (asg.createdAt && asg.availabilityDays) {
+                                        const created = new Date(asg.createdAt as any);
+                                        const end = new Date(created);
+                                        end.setDate(created.getDate() + asg.availabilityDays);
+                                        end.setHours(23,59,59,999);
+                                        endAt = end;
+                                      }
+                                      if (endAt && Date.now() < endAt.getTime() && asg.manualGradingEnabled) {
+                                        // Format date to localized day and 12:00 am
+                                        const options = { weekday: 'long', hour: '2-digit', minute: '2-digit', hour12: true } as const;
+                                        // Always use midnight for Arabic: الساعة 12 صباحًا
+                                        const dateStr = endAt.toLocaleDateString('ar-SA', { weekday: 'long' });
+                                        let hour = endAt.getHours();
+                                        let ampm = 'صباحًا';
+                                        if (hour === 0 || hour === 24) hour = 12;
+                                        else if (hour > 12) { hour -= 12; ampm = 'مساءً'; }
+                                        const min = String(endAt.getMinutes()).padStart(2,'0');
+                                        const deadlineText = `${dateStr} ${hour}:00 ${ampm}`;
+                                        return (
+                                          <div className="text-xs text-red-600 mt-1 font-semibold">
+                                            {language === 'ar' 
+                                              ? `آخر موعد للتسليم: ${deadlineText}`
+                                              : `Due: ${endAt.toLocaleDateString('en-US', { weekday:'long' })} 12:00 am`}
+                                          </div>
+                                        );
+                                      }
+                                    }
+                                    return null;
+                                  })()}
                                 </div>
                                 {item.type === 'assignment' && assignmentResults[item.id] && (
                                   <Badge variant="secondary" className="flex-shrink-0">{language === 'ar' ? 'تم التسليم' : 'Submitted'}</Badge>

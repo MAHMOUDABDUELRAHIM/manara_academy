@@ -14,14 +14,22 @@ interface StudentDashboardPreviewProps {
   title?: string;
   accentColor?: string;
   logo?: string;
+  brandLogoScale?: number;
+  brandNameScale?: number;
 }
 
 export const StudentDashboardPreview: React.FC<StudentDashboardPreviewProps> = ({
   title = 'منصة منارة التعليمية',
   accentColor = '#3B82F6',
-  logo
+  logo,
+  brandLogoScale = 1,
+  brandNameScale = 1
 }) => {
   const { language } = useLanguage();
+  
+  // Calculate dynamic sizes based on scale values
+  const computedLogoSize = Math.round(24 * brandLogoScale); // Base size 24px (w-6 h-6)
+  const computedTitleSize = Math.round(12 * brandNameScale); // Base size 12px (text-xs)
   
   const stats = {
     totalEnrolled: 8,
@@ -83,13 +91,32 @@ export const StudentDashboardPreview: React.FC<StudentDashboardPreviewProps> = (
       >
         <div className="flex items-center gap-2">
           {logo ? (
-            <img src={logo} alt="Logo" className="w-6 h-6 rounded" />
+            <img 
+              src={logo} 
+              alt="Logo" 
+              className="rounded" 
+              style={{ 
+                width: `${computedLogoSize}px`, 
+                height: `${computedLogoSize}px` 
+              }}
+            />
           ) : (
-            <div className="w-6 h-6 bg-white/20 rounded flex items-center justify-center">
+            <div 
+              className="bg-white/20 rounded flex items-center justify-center"
+              style={{ 
+                width: `${computedLogoSize}px`, 
+                height: `${computedLogoSize}px` 
+              }}
+            >
               <BookOpen className="h-3 w-3" />
             </div>
           )}
-          <span className="font-bold text-xs">{title}</span>
+          <span 
+            className="font-bold"
+            style={{ fontSize: `${computedTitleSize}px` }}
+          >
+            {title}
+          </span>
         </div>
         <div className="flex items-center gap-2">
           <Bell className="h-3 w-3" />

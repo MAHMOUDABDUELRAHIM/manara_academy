@@ -23,6 +23,10 @@ export interface TeacherProfile {
   subjectSpecialization?: string;
   bio?: string;
   photoURL?: string;
+  // شعار العلامة الخاص بالمعلم بصيغة Base64 لعرضه علنًا
+  brandLogoBase64?: string;
+  // اسم المنصة/العلامة للمعلم
+  platformName?: string;
   createdAt: string;
   updatedAt: string;
   isActive: boolean;

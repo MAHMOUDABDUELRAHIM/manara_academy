@@ -16,6 +16,7 @@ import TeacherSidebar from "@/components/TeacherSidebar";
 import FloatingSupportChat from "@/components/FloatingSupportChat";
 import { CourseService } from "@/services/courseService";
 import { TeacherService } from "@/services/teacherService";
+import { StudentService, StudentProfile } from "@/services/studentService";
 import { 
   BookOpen, 
   Users, 
@@ -76,6 +77,8 @@ export const TeacherDashboard = () => {
   const [isLoadingCourses, setIsLoadingCourses] = useState(true);
   
   const [linkedStudents, setLinkedStudents] = useState<any[]>([]);
+  const [registeredStudents, setRegisteredStudents] = useState<StudentProfile[]>([]);
+  const [isLoadingStudents, setIsLoadingStudents] = useState(true);
   const [teacherProfile, setTeacherProfile] = useState<any>(null);
   // إدارة كود الدعوة المخصص
   const [invitationCode, setInvitationCode] = useState<string>('');
@@ -125,12 +128,14 @@ export const TeacherDashboard = () => {
     fetchCourses();
   }, [user?.uid]);
 
-  // جلب الطلاب المرتبطين
+  // جلب الطلاب المرتبطين والمسجلين
   useEffect(() => {
     const fetchTeacherData = async () => {
       if (!user?.uid) return;
       
       try {
+        setIsLoadingStudents(true);
+        
         // جلب أو إنشاء ملف تعريف المدرس
         let teacherProfile = await TeacherService.getTeacherByUid(user.uid);
         if (!teacherProfile) {
@@ -144,12 +149,18 @@ export const TeacherDashboard = () => {
         if (teacherProfile) {
           setTeacherProfile(teacherProfile);
           
-          // جلب الطلاب المرتبطين
+          // جلب الطلاب المرتبطين (للإحصائيات)
           const students = await TeacherService.getStudentsForTeacher(user.uid);
           setLinkedStudents(students);
+          
+          // جلب الطلاب المسجلين مع التفاصيل الكاملة
+          const registeredStudentsData = await StudentService.getStudentsByTeacher(user.uid);
+          setRegisteredStudents(registeredStudentsData);
         }
       } catch (error) {
         console.error('خطأ في جلب بيانات المدرس:', error);
+      } finally {
+        setIsLoadingStudents(false);
       }
     };
 
@@ -520,6 +531,21 @@ export const TeacherDashboard = () => {
               </CardContent>
             </Card>
 
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">
+                  {language === 'ar' ? 'الطلاب المسجلون' : 'Registered Students'}
+                </CardTitle>
+                <GraduationCap className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{registeredStudents.length}</div>
+                <p className="text-xs text-muted-foreground">
+                  {language === 'ar' ? 'الطلاب المسجلون في دوراتك' : 'Students enrolled in your courses'}
+                </p>
+              </CardContent>
+            </Card>
+
             {/* تمت إزالة بطاقتي الأرباح الشهرية وإجمالي الأرباح */}
           </div>
 
@@ -610,6 +636,88 @@ export const TeacherDashboard = () => {
                 
                 {/* تم إلغاء سيشن الطلاب المرتبطون */}
               </div>
+            </CardContent>
+          </Card>
+
+          {/* Registered Students Section */}
+          <Card className="mb-6">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <GraduationCap className="h-5 w-5 text-[#2c4656]" />
+                {language === 'ar' ? 'قائمة الطلاب المسجلين' : 'Registered Students'}
+                <Badge variant="secondary" className="ml-2">
+                  {registeredStudents.length}
+                </Badge>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {isLoadingStudents ? (
+                <div className="flex justify-center py-8">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#2c4656]"></div>
+                </div>
+              ) : registeredStudents.length === 0 ? (
+                <div className="text-center py-8">
+                  <Users className="h-16 w-16 text-gray-300 mx-auto mb-4" />
+                  <h3 className="text-lg font-medium text-gray-600 mb-2">
+                    {language === 'ar' ? 'لا يوجد طلاب مسجلين' : 'No registered students'}
+                  </h3>
+                  <p className="text-gray-500">
+                    {language === 'ar' 
+                      ? 'شارك رمز الدعوة مع الطلاب للبدء'
+                      : 'Share your invitation code with students to get started'
+                    }
+                  </p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b">
+                        <th className="text-right py-3 px-4 font-medium">
+                          {language === 'ar' ? 'اسم الطالب' : 'Student Name'}
+                        </th>
+                        <th className="text-right py-3 px-4 font-medium">
+                          {language === 'ar' ? 'البريد الإلكتروني' : 'Email'}
+                        </th>
+                        <th className="text-right py-3 px-4 font-medium">
+                          {language === 'ar' ? 'تاريخ التسجيل' : 'Registration Date'}
+                        </th>
+                        <th className="text-right py-3 px-4 font-medium">
+                          {language === 'ar' ? 'آخر نشاط' : 'Last Activity'}
+                        </th>
+                        <th className="text-right py-3 px-4 font-medium">
+                          {language === 'ar' ? 'الحالة' : 'Status'}
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {registeredStudents.map((student) => (
+                        <tr key={student.id} className="border-b hover:bg-gray-50">
+                          <td className="py-3 px-4 font-medium">{student.fullName}</td>
+                          <td className="py-3 px-4 text-gray-600">{student.email}</td>
+                          <td className="py-3 px-4 text-gray-600">
+                            {student.createdAt?.toDate?.()?.toLocaleDateString(language === 'ar' ? 'ar-SA' : 'en-US') || 
+                             new Date(student.createdAt).toLocaleDateString(language === 'ar' ? 'ar-SA' : 'en-US')}
+                          </td>
+                          <td className="py-3 px-4 text-gray-600">
+                            {student.lastActivity?.toDate?.()?.toLocaleDateString(language === 'ar' ? 'ar-SA' : 'en-US') || 
+                             (student.lastActivity ? new Date(student.lastActivity).toLocaleDateString(language === 'ar' ? 'ar-SA' : 'en-US') : 
+                              language === 'ar' ? 'غير محدد' : 'Not available')}
+                          </td>
+                          <td className="py-3 px-4">
+                            <Badge variant={student.isActive ? "default" : "secondary"}>
+                              {student.isActive 
+                                ? (language === 'ar' ? 'نشط' : 'Active')
+                                : (language === 'ar' ? 'غير نشط' : 'Inactive')
+                              }
+                            </Badge>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </CardContent>
           </Card>
 

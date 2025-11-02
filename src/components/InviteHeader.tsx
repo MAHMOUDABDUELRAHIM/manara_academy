@@ -7,6 +7,13 @@ import { ProfileDropdown } from '@/components/ProfileDropdown';
 interface InviteHeaderProps {
   teacherName?: string;
   teacherPhotoURL?: string;
+  // شعار العلامة الخاص بالمعلم (Base64)
+  brandLogo?: string;
+  // اسم المنصة/العلامة لعرضه في الهيدر
+  brandName?: string;
+  // معاملات تكبير/تصغير للشعار واسم المنصة (اختياري)
+  brandLogoScale?: number;
+  brandNameScale?: number;
   showProfileAvatar?: boolean;
   unreadCount?: number;
   onNotificationsClick?: () => void;
@@ -23,7 +30,7 @@ const getInitials = (name: string) => {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 };
 
-export default function InviteHeader({ teacherName, teacherPhotoURL, showProfileAvatar = true, unreadCount = 0, onNotificationsClick, notifications = [], showNotifications = false, onNotificationItemClick, teacherId }: InviteHeaderProps) {
+export default function InviteHeader({ teacherName, teacherPhotoURL, brandLogo, brandName, brandLogoScale = 1, brandNameScale = 1, showProfileAvatar = true, unreadCount = 0, onNotificationsClick, notifications = [], showNotifications = false, onNotificationItemClick, teacherId }: InviteHeaderProps) {
   const { language, setLanguage } = useLanguage();
   const [isDark, setIsDark] = useState<boolean>(() => {
     if (typeof document !== 'undefined') {
@@ -47,7 +54,14 @@ export default function InviteHeader({ teacherName, teacherPhotoURL, showProfile
     }
   }, [isDark]);
 
-  const displayName = teacherName || (language === 'ar' ? 'الأستاذ' : 'Teacher');
+  const displayName = brandName || teacherName || (language === 'ar' ? 'الأستاذ' : 'Teacher');
+  const isArabicBrand = /[\u0600-\u06FF]/.test(displayName);
+
+  // حسابات الحجم الديناميكي للشعار واسم المنصة
+  const logoBasePx = 48; // w-12 ~= 48px
+  const computedLogoPx = Math.round(logoBasePx * Math.max(0.5, Math.min(brandLogoScale || 1, 2)));
+  const nameBasePx = isArabicBrand ? 20 : 18; // الأساس: عربي (text-xl) وغير عربي (text-lg)
+  const computedNamePx = Math.round(nameBasePx * Math.max(0.5, Math.min(brandNameScale || 1, 2)));
 
   const studentName = auth.currentUser?.displayName
     || (auth.currentUser?.email ? String(auth.currentUser.email).split('@')[0] : (language === 'ar' ? 'الطالب' : 'Student'));
@@ -56,17 +70,27 @@ export default function InviteHeader({ teacherName, teacherPhotoURL, showProfile
   return (
     <header className="sticky top-0 z-50 bg-white/80 dark:bg-gray-900/80 backdrop-blur-sm shadow-sm">
       <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between gap-4" dir={language === 'ar' ? 'rtl' : 'ltr'}>
-        {/* Left: Teacher avatar + name */}
+        {/* Left: Teacher logo/avatar + name */}
         <div className="flex items-center gap-3">
-          {teacherPhotoURL ? (
-            <img src={teacherPhotoURL} alt={displayName} className="w-10 h-10 rounded-full object-cover border" />
+          {brandLogo ? (
+            <img src={brandLogo} alt={displayName} className="rounded object-cover border rounded-full" style={{ width: computedLogoPx, height: computedLogoPx }} />
+          ) : teacherPhotoURL ? (
+            <img src={teacherPhotoURL} alt={displayName} className="rounded-full object-cover border" style={{ width: computedLogoPx, height: computedLogoPx }} />
           ) : (
-            <div className="w-10 h-10 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold">
+            <div className="rounded-full bg-blue-600 text-white flex items-center justify-center font-bold" style={{ width: computedLogoPx, height: computedLogoPx }}>
               {getInitials(displayName)}
             </div>
           )}
           <div className="leading-tight">
-            <div className="font-semibold text-gray-900 dark:text-white">{displayName}</div>
+            <div
+              className={isArabicBrand 
+                ? "font-arabicBrand font-extrabold text-xl md:text-2xl tracking-wide bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-indigo-600"
+                : "font-semibold text-gray-900 dark:text-white text-lg md:text-xl"
+              }
+              style={{ fontSize: `${computedNamePx}px` }}
+            >
+              {displayName}
+            </div>
           </div>
         </div>
 

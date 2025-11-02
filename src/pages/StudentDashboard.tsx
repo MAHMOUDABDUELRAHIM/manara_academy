@@ -162,6 +162,11 @@ export const StudentDashboard = () => {
   const [assignmentView, setAssignmentView] = useState<'list' | 'detail'>('list');
   const [selectedAssignmentResult, setSelectedAssignmentResult] = useState<any | null>(null);
 const [dashboardTheme, setDashboardTheme] = useState<'proA' | 'proB' | 'modernLight'>('proA');
+ // شعار العلامة للمدرس (Base64) لاستخدامه في الهيدر
+  const [brandLogo, setBrandLogo] = useState<string>('');
+  const [brandName, setBrandName] = useState<string>('');
+  const [brandLogoScale, setBrandLogoScale] = useState<number>(1);
+  const [brandNameScale, setBrandNameScale] = useState<number>(1);
 // إضافة حالة لأوقات محاولات الامتحان
 const [examAttempts, setExamAttempts] = useState<Record<string, { startAt?: Date; submittedAt?: Date }>>({});
 // دالة تنسيق مدة الزمن المستهلكة
@@ -334,6 +339,14 @@ const formatDuration = (ms: number) => {
             setDashboardSettings(teacher.dashboardSettings);
           }
 
+          // شعار واسم العلامة من وثيقة المدرس (متاح للطلاب)
+          try {
+            const teacherBrandLogo = (teacher as any)?.brandLogoBase64 as string | undefined;
+            if (teacherBrandLogo) setBrandLogo(teacherBrandLogo);
+            const teacherBrandName = (teacher as any)?.platformName as string | undefined;
+            if (teacherBrandName) setBrandName(teacherBrandName);
+          } catch {}
+
           // تحميل ثيم لوحة التحكم للطالب من إعدادات المعلم
           try {
             const settingsDoc = await getDoc(doc(db, 'teacherSettings', teacher.id));
@@ -345,6 +358,14 @@ const formatDuration = (ms: number) => {
                 // Map Professional Theme B to Modern Light
                 setDashboardTheme('modernLight');
               }
+              const logo = settingsDoc.data().platformLogoBase64 as string | undefined;
+              if (!brandLogo && logo) setBrandLogo(logo);
+              const name = settingsDoc.data().platformName as string | undefined;
+              if (!brandName && name) setBrandName(name);
+              const logoScale = settingsDoc.data().brandLogoScale as number | undefined;
+              if (typeof logoScale === 'number') setBrandLogoScale(Math.min(3, Math.max(0.6, logoScale)));
+              const nameScale = settingsDoc.data().brandNameScale as number | undefined;
+              if (typeof nameScale === 'number') setBrandNameScale(Math.min(3, Math.max(0.6, nameScale)));
             }
           } catch (e) {
             console.warn('Failed to load dashboard theme', e);
@@ -674,6 +695,10 @@ const formatDuration = (ms: number) => {
       {/* Custom Header */}
       <InviteHeader 
         teacherName={studentInfo?.teacherName}
+        brandLogo={brandLogo}
+        brandName={brandName}
+        brandLogoScale={brandLogoScale}
+        brandNameScale={brandNameScale}
         teacherId={studentInfo?.teacherId}
         unreadCount={unreadNotifications}
         onNotificationsClick={async () => {

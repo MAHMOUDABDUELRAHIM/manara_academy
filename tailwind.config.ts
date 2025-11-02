@@ -16,6 +16,7 @@ export default {
       fontFamily: {
         sans: ['Inter', 'sans-serif'],
         heading: ['Poppins', 'sans-serif'],
+        arabicBrand: ['Cairo', 'Inter', 'Segoe UI', 'Tahoma', 'sans-serif'],
       },
       colors: {
         border: "hsl(var(--border))",

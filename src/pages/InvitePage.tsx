@@ -5,11 +5,13 @@ import { useLanguage } from '../contexts/LanguageContext'
 import { TeacherService } from '../services/teacherService'
 import { toast } from 'sonner'
 import { Eye, EyeOff, LogIn, UserPlus, Globe, Mail, Lock, User, Search, Sun, Moon, Inbox, Loader2 } from 'lucide-react'
-import { auth } from '@/firebase/config'
+import { auth, db } from '@/firebase/config'
+import { doc, getDoc } from 'firebase/firestore'
 import { signOut } from 'firebase/auth'
 import { CourseService } from '@/services/courseService'
 import { Course } from '@/types/course'
 import { StudentService } from '@/services/studentService'
+import InviteHero from '@/components/InviteHero'
 
 interface Teacher {
   uid: string
@@ -57,6 +59,16 @@ export default function InvitePage() {
   return false
 })
   const [signingOut, setSigningOut] = useState(false)
+  // شعار العلامة الخاص بالمعلم (Base64) لعرضه فوراً في الهيدر
+  const [brandLogo, setBrandLogo] = useState<string>('')
+  const [brandName, setBrandName] = useState<string>('')
+  // Editable hero texts from teacher settings
+  const [heroTitleAr, setHeroTitleAr] = useState<string>('')
+  const [heroTitleEn, setHeroTitleEn] = useState<string>('')
+  const [heroDescAr, setHeroDescAr] = useState<string>('')
+  const [heroDescEn, setHeroDescEn] = useState<string>('')
+  const [brandLogoScale, setBrandLogoScale] = useState<number>(1)
+  const [brandNameScale, setBrandNameScale] = useState<number>(1)
 
 // Theme toggle handler
 const toggleTheme = () => setIsDark(v => !v)
@@ -86,6 +98,23 @@ useEffect(() => {
   
   const [forgotEmail, setForgotEmail] = useState('')
 
+  // Scroll progress for header top-edge bar
+  const [scrollProgress, setScrollProgress] = useState(0)
+  const [isScrolled, setIsScrolled] = useState(false)
+  useEffect(() => {
+    const onScroll = () => {
+      const doc = document.documentElement
+      const total = doc.scrollHeight - doc.clientHeight
+      const current = doc.scrollTop
+      const progress = total > 0 ? current / total : 0
+      setScrollProgress(Math.max(0, Math.min(1, progress)))
+      setIsScrolled(current > 0)
+    }
+    window.addEventListener('scroll', onScroll, { passive: true })
+    onScroll()
+    return () => window.removeEventListener('scroll', onScroll)
+  }, [])
+
   useEffect(() => {
     const fetchTeacher = async () => {
       if (!teacherId) {
@@ -102,6 +131,47 @@ useEffect(() => {
           localStorage.setItem('teacherId', teacherData.uid)
           console.log('Saved teacherId to localStorage:', teacherData.uid)
         }
+        // اسم المنصة من وثيقة المدرس (إن وجد)
+        try {
+          const tName = (teacherData as any)?.platformName as string | undefined
+          if (tName) setBrandName(tName)
+        } catch {}
+        // قراءات احتياطية من وثيقة المدرس: الشعار والقياسات
+        try {
+          const tLogoBase64 = (teacherData as any)?.brandLogoBase64 as string | undefined
+          if (tLogoBase64) setBrandLogo(tLogoBase64)
+
+          const tLogoScale = (teacherData as any)?.brandLogoScale as number | undefined
+          if (typeof tLogoScale === 'number') setBrandLogoScale(Math.min(3, Math.max(0.6, tLogoScale)))
+
+          const tNameScale = (teacherData as any)?.brandNameScale as number | undefined
+          if (typeof tNameScale === 'number') setBrandNameScale(Math.min(3, Math.max(0.6, tNameScale)))
+        } catch {}
+        // تحميل شعار العلامة من إعدادات المعلم
+        try {
+          const settingsDoc = await getDoc(doc(db, 'teacherSettings', teacherId))
+          if (settingsDoc.exists()) {
+            const logo = settingsDoc.data().platformLogoBase64 as string | undefined
+            if (logo) setBrandLogo(logo)
+            const name = settingsDoc.data().platformName as string | undefined
+            if (name) setBrandName(name)
+            const logoScale = settingsDoc.data().brandLogoScale as number | undefined
+            if (typeof logoScale === 'number') setBrandLogoScale(Math.min(3, Math.max(0.6, logoScale)))
+            const nameScale = settingsDoc.data().brandNameScale as number | undefined
+            if (typeof nameScale === 'number') setBrandNameScale(Math.min(3, Math.max(0.6, nameScale)))
+            // Load hero section texts if available
+            const inviteHero = settingsDoc.data().inviteHero as any | undefined
+            if (inviteHero) {
+              if (typeof inviteHero.heroTitleAr === 'string') setHeroTitleAr(inviteHero.heroTitleAr)
+              if (typeof inviteHero.heroTitleEn === 'string') setHeroTitleEn(inviteHero.heroTitleEn)
+              if (typeof inviteHero.heroDescAr === 'string') setHeroDescAr(inviteHero.heroDescAr)
+              if (typeof inviteHero.heroDescEn === 'string') setHeroDescEn(inviteHero.heroDescEn)
+            }
+          }
+        } catch (e) {
+          console.warn('Failed to load brand logo', e)
+        }
+
         // Fetch teacher courses
         try {
           setCoursesLoading(true)
@@ -245,18 +315,67 @@ useEffect(() => {
         </div>
       )}
       {/* Header with teacher logo and language selector */}
-      <header className="bg-white/80 dark:bg-gray-900/80 backdrop-blur-sm shadow-sm">
+      <header
+        className={`sticky top-0 z-50 relative ${
+          isScrolled
+            ? 'bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-gray-950 dark:to-gray-900'
+            : 'bg-transparent'
+        }`}
+      >
+        {/* Bottom-edge scroll progress with full-width track and moving indicator */}
+        <div className="absolute left-0 bottom-0 w-full pointer-events-none">
+          <div
+            className={`relative h-1 transform-gpu origin-top transition-all duration-500 ease-out ${
+              isScrolled ? 'opacity-100 scale-y-100' : 'opacity-0 scale-y-0'
+            }`}
+          >
+            {/* Full-width track */}
+            <div className="absolute inset-0 bg-blue-200 dark:bg-indigo-900/40" />
+            {/* Moving indicator */}
+            <div
+              className="absolute inset-y-0 left-0 bg-blue-500 dark:bg-indigo-400"
+              style={{ width: `${Math.round(scrollProgress * 100)}%` }}
+            />
+          </div>
+        </div>
         <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            {teacher?.photoURL ? (
-              <img src={teacher.photoURL} alt={teacher.fullName} className="w-10 h-10 rounded-full object-cover border" />
-            ) : (
-              <div className="w-10 h-10 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold">
-                {getInitials(teacher?.fullName || (language === 'ar' ? 'الأستاذ' : 'Teacher'))}
-              </div>
-            )}
+            {(() => {
+              const clamp = (v: number) => Math.min(3, Math.max(0.6, v || 1));
+              const logoBasePx = 48;
+              const logoSize = Math.round(logoBasePx * clamp(brandLogoScale));
+              const displayName = brandName || teacher?.fullName || (language === 'ar' ? 'الأستاذ' : 'Teacher');
+              if (brandLogo || (teacher as any)?.brandLogoBase64) {
+                return <img src={brandLogo || (teacher as any)?.brandLogoBase64} alt={displayName} className="rounded object-cover border rounded-full" style={{ width: logoSize, height: logoSize }} />
+              } else if (teacher?.photoURL) {
+                return <img src={brandLogo || (teacher as any)?.brandLogoBase64 || teacher.photoURL} alt={displayName} className="rounded-full object-cover border" style={{ width: logoSize, height: logoSize }} />
+              } else {
+                return (
+                  <div className="rounded-full bg-blue-600 text-white flex items-center justify-center font-bold" style={{ width: logoSize, height: logoSize }}>
+                    {getInitials(displayName)}
+                  </div>
+                )
+              }
+            })()}
             <div className="leading-tight">
-              <div className="font-semibold text-gray-900">{teacher?.fullName || (language === 'ar' ? 'الأستاذ' : 'Teacher')}</div>
+            {(() => {
+              const displayName = brandName || teacher?.fullName || (language === 'ar' ? 'الأستاذ' : 'Teacher');
+              const isArabic = /[\u0600-\u06FF]/.test(displayName);
+              const clamp = (v: number) => Math.min(3, Math.max(0.6, v || 1));
+              const nameBasePx = isArabic ? 20 : 18; // Arabic: text-xl, Non-Arabic: text-lg
+              const nameSize = Math.round(nameBasePx * clamp(brandNameScale));
+              return (
+                <div
+                  className={isArabic
+                    ? "font-arabicBrand font-extrabold tracking-wide bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-indigo-600"
+                    : "font-semibold text-gray-900 dark:text-white"
+                  }
+                  style={{ fontSize: `${nameSize}px` }}
+                >
+                  {displayName}
+                </div>
+              );
+            })()}
               {/* Removed subtext "Invite Students" per request */}
             </div>
           </div>
@@ -315,77 +434,19 @@ useEffect(() => {
           </div>
         </div>
       </header>
-      {/* Enlarged banner with CTA buttons inside */}
-      <section className="py-16">
-        <div className="max-w-6xl mx-auto px-4 grid grid-cols-1 md:grid-cols-2 gap-10 items-center">
-          {/* Left: illustration / photo */}
-          <div className="order-2 md:order-1 flex justify-center md:justify-start">
-            <div className="relative w-72 h-72 rounded-full bg-blue-100 flex items-center justify-center ring-8 ring-blue-200">
-              {teacher?.photoURL ? (
-                <img src={teacher.photoURL} alt={teacher.fullName} className="w-64 h-64 object-cover rounded-full" />
-              ) : (
-                <div className="w-64 h-64 rounded-full bg-blue-500 text-white flex items-center justify-center text-5xl font-extrabold">
-                  {getInitials(teacher?.fullName || (language === 'ar' ? 'الأستاذ' : 'Teacher'))}
-                </div>
-              )}
-              <span className="absolute -top-2 -left-2 bg-white text-blue-600 text-xs px-2 py-1 rounded-full shadow">{language === 'ar' ? 'دعوة' : 'Invite'}</span>
-              <span className="absolute -bottom-2 -right-2 bg-white text-indigo-600 text-xs px-2 py-1 rounded-full shadow">{language === 'ar' ? 'انضم' : 'Join'}</span>
-            </div>
-          </div>
-      
-          {/* Right: headline + description + CTAs */}
-          <div className={`${language === 'ar' ? 'text-right' : 'text-left'} order-1 md:order-2`}>
-            <h1 className="text-4xl md:text-5xl font-bold leading-tight mb-4">
-              {language === 'ar' ? (
-                <>منصة <span className="text-blue-600">منارة</span> الأكاديمية</>
-              ) : (
-                <>Manara <span className="text-blue-600">Academy</span> Platform</>
-              )}
-            </h1>
-            <p className="text-gray-700 dark:text-gray-300 text-lg mb-6">
-              {language === 'ar'
-                ? 'منصة متكاملة بها كل ما يحتاجه الطالب للتفوق'
-                : 'A complete platform with everything students need to excel'}
-            </p>
-            <div className={`flex flex-col sm:flex-row ${language === 'ar' ? 'justify-end' : 'justify-start'} items-center gap-4`}>
-              {/* Conditional CTA buttons based on login state */}
-              {!auth.currentUser ? (
-                <>
-                  <a
-                    href={teacherId ? '/register/student?teacherId=' + teacherId : '/register/student'}
-                    className="inline-block bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-medium transition-colors"
-                  >
-                    {language === 'ar' ? 'اعمل حساب جديد' : 'Create New Account'}
-                  </a>
-                  <a
-                    href={teacherId ? '/student-login?teacherId=' + teacherId : '/student-login'}
-                    className="inline-block bg-white border border-blue-600 text-blue-700 hover:bg-blue-50 px-6 py-3 rounded-lg font-medium transition-colors"
-                  >
-                    {language === 'ar' ? 'سجل دخولك' : 'Sign In'}
-                  </a>
-                </>
-              ) : (
-                <>
-                  <a
-                    href={'/dashboard'}
-                    className="inline-block bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-medium transition-colors"
-                  >
-                    {language === 'ar' ? 'تصفح كورساتك' : 'Browse Your Courses'}
-                  </a>
-                  <button
-                    onClick={handleSignOutClick}
-                    disabled={signingOut}
-                    className="inline-flex items-center bg-white border border-blue-600 text-blue-700 hover:bg-blue-50 px-6 py-3 rounded-lg font-medium transition-colors"
-                  >
-                    {signingOut && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-                    {language === 'ar' ? (signingOut ? 'جارٍ تسجيل الخروج...' : 'تسجيل خروج') : (signingOut ? 'Signing out...' : 'Sign Out')}
-                  </button>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-      </section>
+      {/* Hero Section (reusable component) */}
+      <InviteHero
+        language={language}
+        teacherFullName={teacher?.fullName}
+        teacherPhotoURL={teacher?.photoURL}
+        teacherId={teacherId}
+        isAuthenticated={!!auth.currentUser}
+        onSignOutClick={handleSignOutClick}
+        heroTitleAr={heroTitleAr}
+        heroTitleEn={heroTitleEn}
+        heroDescAr={heroDescAr}
+        heroDescEn={heroDescEn}
+      />
 
       {/* Main content with teacher info and published courses */}
       <main className="max-w-6xl mx-auto px-4 py-10">

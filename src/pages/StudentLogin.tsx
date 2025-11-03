@@ -13,6 +13,7 @@ import { auth, db } from "@/firebase/config";
 import { doc, getDoc } from "firebase/firestore";
 import { signOut } from "firebase/auth";
 import { toast } from "sonner";
+import { MessageCircle } from "lucide-react";
 
 const StudentLogin = () => {
   const [isSuspended, setIsSuspended] = useState(false);
@@ -31,6 +32,9 @@ const StudentLogin = () => {
   const [teacherInfo, setTeacherInfo] = useState<any>(null);
   // Theme state loaded from teacher settings
   const [dashboardTheme, setDashboardTheme] = useState<'proA' | 'proB'>('proA');
+  // WhatsApp settings
+  const [whatsappNumber, setWhatsappNumber] = useState<string>('');
+  const [showWhatsappFloat, setShowWhatsappFloat] = useState<boolean>(false);
 
   // استخراج معرف المعلم من الرابط
   useEffect(() => {
@@ -59,6 +63,13 @@ const StudentLogin = () => {
       const teacher = await TeacherService.getTeacherByUid(teacherIdParam);
       if (teacher) {
         setTeacherInfo(teacher);
+        // WhatsApp from public teacher profile (mirrored)
+        if (typeof teacher.whatsappNumber === 'string' && teacher.whatsappNumber.trim()) {
+          setWhatsappNumber(teacher.whatsappNumber);
+        }
+        if (typeof teacher.showWhatsappFloat === 'boolean') {
+          setShowWhatsappFloat(teacher.showWhatsappFloat);
+        }
         // Load theme from teacherSettings
         try {
           const settingsDoc = await getDoc(doc(db, 'teacherSettings', teacherIdParam));
@@ -66,6 +77,14 @@ const StudentLogin = () => {
             const theme = settingsDoc.data().studentDashboardTheme as 'proA' | 'proB' | undefined;
             if (theme === 'proA' || theme === 'proB') {
               setDashboardTheme(theme);
+            }
+            // Fallback: WhatsApp from teacherSettings if not present publicly
+            const sd = settingsDoc.data() as any;
+            if ((!whatsappNumber || !whatsappNumber.trim()) && typeof sd?.whatsappNumber === 'string' && sd.whatsappNumber.trim()) {
+              setWhatsappNumber(sd.whatsappNumber);
+            }
+            if (typeof sd?.showWhatsappFloat === 'boolean') {
+              setShowWhatsappFloat(sd.showWhatsappFloat);
             }
           }
         } catch (e) {
@@ -230,8 +249,11 @@ const StudentLogin = () => {
   };
 
   const themeAccent = dashboardTheme === 'proA' ? '#3b82f6' : '#10b981';
+  const normalizedWhatsapp = (whatsappNumber || '').replace(/[^+\d]/g, '');
+  const shouldShowWhatsapp = !!showWhatsappFloat && !!normalizedWhatsapp;
 
   return (
+    <>
     <div dir={language === 'ar' ? 'rtl' : 'ltr'} className={`min-h-screen flex items-center justify-center p-4 ${dashboardTheme === 'proA' ? 'bg-gradient-to-br from-blue-50 to-indigo-100' : 'bg-gradient-to-br from-emerald-50 to-green-100'}`}>
       <div className="w-full max-w-md">
         {/* Teacher Branding Section */}
@@ -408,7 +430,19 @@ const StudentLogin = () => {
           <p>© 2024 منارة الأكاديمية. جميع الحقوق محفوظة.</p>
         </div>
       </div>
+      {shouldShowWhatsapp && (
+        <a
+          href={`https://wa.me/${normalizedWhatsapp}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="fixed bottom-6 right-6 z-50 inline-flex items-center justify-center w-14 h-14 rounded-full bg-green-500 hover:bg-green-600 shadow-lg text-white"
+          aria-label={language === 'ar' ? 'تواصل عبر واتساب' : 'Contact via WhatsApp'}
+        >
+          <MessageCircle className="w-7 h-7" />
+        </a>
+      )}
     </div>
+    </>
   );
 };
 

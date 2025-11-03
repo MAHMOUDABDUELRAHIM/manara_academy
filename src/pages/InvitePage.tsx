@@ -4,7 +4,7 @@ import { useAuth } from '../hooks/useAuth'
 import { useLanguage } from '../contexts/LanguageContext'
 import { TeacherService } from '../services/teacherService'
 import { toast } from 'sonner'
-import { Eye, EyeOff, LogIn, UserPlus, Globe, Mail, Lock, User, Search, Sun, Moon, Inbox, Loader2 } from 'lucide-react'
+import { Eye, EyeOff, LogIn, UserPlus, Globe, Mail, Lock, User, Search, Sun, Moon, Inbox, Loader2, Facebook, Instagram, Twitter, Linkedin, MessageCircle } from 'lucide-react'
 import { auth, db } from '@/firebase/config'
 import { doc, getDoc } from 'firebase/firestore'
 import { signOut } from 'firebase/auth'
@@ -62,6 +62,11 @@ export default function InvitePage() {
   // شعار العلامة الخاص بالمعلم (Base64) لعرضه فوراً في الهيدر
   const [brandLogo, setBrandLogo] = useState<string>('')
   const [brandName, setBrandName] = useState<string>('')
+  // روابط وسائل التواصل الاجتماعي للفوتر
+  const [socialMedia, setSocialMedia] = useState<{ facebook?: string; instagram?: string; twitter?: string; linkedin?: string; telegram?: string }>({})
+  // إعدادات واتساب العائم
+  const [whatsappNumber, setWhatsappNumber] = useState<string>('')
+  const [showWhatsappFloat, setShowWhatsappFloat] = useState<boolean>(false)
   // Editable hero texts from teacher settings
   const [heroTitleAr, setHeroTitleAr] = useState<string>('')
   const [heroTitleEn, setHeroTitleEn] = useState<string>('')
@@ -146,10 +151,18 @@ useEffect(() => {
 
           const tNameScale = (teacherData as any)?.brandNameScale as number | undefined
           if (typeof tNameScale === 'number') setBrandNameScale(Math.min(3, Math.max(0.6, tNameScale)))
+          // روابط التواصل وواتساب من وثيقة المدرس (عامة)
+          const tSocial = (teacherData as any)?.socialMedia as { facebook?: string; instagram?: string; twitter?: string; linkedin?: string; telegram?: string } | undefined
+          if (tSocial && typeof tSocial === 'object') setSocialMedia(tSocial)
+          const tWhats = (teacherData as any)?.whatsappNumber as string | undefined
+          if (typeof tWhats === 'string') setWhatsappNumber(tWhats)
+          const tWhatsShow = !!(teacherData as any)?.showWhatsappFloat
+          setShowWhatsappFloat(tWhatsShow)
         } catch {}
         // تحميل شعار العلامة من إعدادات المعلم
         try {
           const settingsDoc = await getDoc(doc(db, 'teacherSettings', teacherId))
+          ;(window as any).__inviteSettingsExists = settingsDoc.exists()
           if (settingsDoc.exists()) {
             const logo = settingsDoc.data().platformLogoBase64 as string | undefined
             if (logo) setBrandLogo(logo)
@@ -159,13 +172,52 @@ useEffect(() => {
             if (typeof logoScale === 'number') setBrandLogoScale(Math.min(3, Math.max(0.6, logoScale)))
             const nameScale = settingsDoc.data().brandNameScale as number | undefined
             if (typeof nameScale === 'number') setBrandNameScale(Math.min(3, Math.max(0.6, nameScale)))
-            // Load hero section texts if available
-            const inviteHero = settingsDoc.data().inviteHero as any | undefined
-            if (inviteHero) {
-              if (typeof inviteHero.heroTitleAr === 'string') setHeroTitleAr(inviteHero.heroTitleAr)
-              if (typeof inviteHero.heroTitleEn === 'string') setHeroTitleEn(inviteHero.heroTitleEn)
-              if (typeof inviteHero.heroDescAr === 'string') setHeroDescAr(inviteHero.heroDescAr)
-              if (typeof inviteHero.heroDescEn === 'string') setHeroDescEn(inviteHero.heroDescEn)
+            // Load social media links + WhatsApp float settings
+            const data = settingsDoc.data()
+            const sm = (data.socialMedia || {}) as { facebook?: string; instagram?: string; twitter?: string; linkedin?: string; telegram?: string }
+            setSocialMedia(sm)
+            const wa = (data.whatsappNumber as string) || ''
+            setWhatsappNumber(wa)
+            const waShow = !!data.showWhatsappFloat
+            setShowWhatsappFloat(waShow)
+            // Load hero section texts if available (prefer nested inviteHero, then fallback to top-level fields)
+            const inviteHero = data.inviteHero as any | undefined
+            let appliedHero = false
+            if (inviteHero && typeof inviteHero === 'object') {
+              const tAr = typeof inviteHero.heroTitleAr === 'string' ? inviteHero.heroTitleAr.trim() : undefined
+              const tEn = typeof inviteHero.heroTitleEn === 'string' ? inviteHero.heroTitleEn.trim() : undefined
+              const dAr = typeof inviteHero.heroDescAr === 'string' ? inviteHero.heroDescAr.trim() : undefined
+              const dEn = typeof inviteHero.heroDescEn === 'string' ? inviteHero.heroDescEn.trim() : undefined
+
+              if (tAr && tAr.length > 0) { setHeroTitleAr(tAr); appliedHero = true }
+              if (tEn && tEn.length > 0) { setHeroTitleEn(tEn); appliedHero = true }
+              if (dAr && dAr.length > 0) { setHeroDescAr(dAr); appliedHero = true }
+              if (dEn && dEn.length > 0) { setHeroDescEn(dEn); appliedHero = true }
+              ;(window as any).__inviteHeroSource = 'nested'
+              ;(window as any).__inviteHeroValues = { tAr, tEn, dAr, dEn }
+            }
+            // Fallback: legacy top-level hero fields when nested inviteHero is missing or empty
+            if (!appliedHero) {
+              const tArTop = typeof data.heroTitleAr === 'string' ? data.heroTitleAr.trim() : undefined
+              const tEnTop = typeof data.heroTitleEn === 'string' ? data.heroTitleEn.trim() : undefined
+              const dArTop = typeof data.heroDescAr === 'string' ? data.heroDescAr.trim() : undefined
+              const dEnTop = typeof data.heroDescEn === 'string' ? data.heroDescEn.trim() : undefined
+
+              if (tArTop && tArTop.length > 0) setHeroTitleAr(tArTop)
+              if (tEnTop && tEnTop.length > 0) setHeroTitleEn(tEnTop)
+              if (dArTop && dArTop.length > 0) setHeroDescAr(dArTop)
+              if (dEnTop && dEnTop.length > 0) setHeroDescEn(dEnTop)
+              ;(window as any).__inviteHeroSource = 'top-level'
+              ;(window as any).__inviteHeroValues = { tArTop, tEnTop, dArTop, dEnTop }
+            }
+            // Final fallback from brand name if hero still empty (for robustness only)
+            if (!appliedHero) {
+              const bName = (data.platformName as string) || ''
+              if (bName) {
+                setHeroTitleAr(prev => prev || `منصة ${bName}`)
+                setHeroTitleEn(prev => prev || `platform ${bName}`)
+              }
+              ;(window as any).__inviteBrandName = bName
             }
           }
         } catch (e) {
@@ -535,8 +587,54 @@ useEffect(() => {
         </div>
       </section>
       <footer className="mt-10 py-6 text-center text-sm text-gray-600 dark:text-gray-400">
+        {/* Social media icons centered above rights reserved */}
+        {(() => {
+          const links = [
+            { key: 'facebook', url: socialMedia.facebook, icon: <Facebook className="w-6 h-6" /> },
+            { key: 'instagram', url: socialMedia.instagram, icon: <Instagram className="w-6 h-6" /> },
+            { key: 'twitter', url: socialMedia.twitter, icon: <Twitter className="w-6 h-6" /> },
+            { key: 'linkedin', url: socialMedia.linkedin, icon: <Linkedin className="w-6 h-6" /> },
+            { key: 'telegram', url: socialMedia.telegram, icon: <MessageCircle className="w-6 h-6" /> },
+          ].filter(l => typeof l.url === 'string' && l.url.trim() !== '')
+
+          if (links.length === 0) return null
+          return (
+            <div className="mb-6">
+              <div className="mb-3 text-gray-700 dark:text-gray-300 text-lg font-semibold">
+                {language === 'ar' ? 'تابعني على' : 'Follow me on'}
+              </div>
+              <div className="flex items-center justify-center gap-4">
+                {links.map(l => (
+                  <a
+                    key={l.key}
+                    href={l.url as string}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label={language === 'ar' ? `رابط ${l.key}` : `${l.key} link`}
+                    className="inline-flex items-center justify-center w-10 h-10 rounded-full border border-gray-300 bg-white hover:bg-gray-50 text-gray-700"
+                  >
+                    {l.icon}
+                  </a>
+                ))}
+              </div>
+            </div>
+          )
+        })()}
         {language === 'ar' ? 'جميع الحقوق محفوظة لدى اكاديمية منارة' : 'All rights reserved to Manara Academy'}
       </footer>
+
+      {/* Floating WhatsApp button (optional) */}
+      {showWhatsappFloat && whatsappNumber && (
+        <a
+          href={`https://wa.me/${whatsappNumber.replace(/[^+\d]/g, '')}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="fixed bottom-6 right-6 z-50 inline-flex items-center justify-center w-12 h-12 rounded-full bg-green-500 hover:bg-green-600 shadow-lg text-white"
+          aria-label={language === 'ar' ? 'تواصل عبر واتساب' : 'Contact via WhatsApp'}
+        >
+          <MessageCircle className="w-6 h-6" />
+        </a>
+      )}
     </div>
   )
 }

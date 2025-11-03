@@ -18,7 +18,14 @@ import {
   AlertCircle,
   Edit,
   X,
-  UserPlus
+  UserPlus,
+  Facebook,
+  Instagram,
+  Twitter,
+  Linkedin,
+  MessageCircle,
+  Phone,
+  Settings
 } from 'lucide-react';
 import { sendEmailVerification, onAuthStateChanged } from 'firebase/auth';
 import { doc, getDoc, setDoc, updateDoc, collection, query, where, getDocs, deleteDoc } from 'firebase/firestore';
@@ -68,6 +75,21 @@ export default function InviteStudents() {
   const [heroDescAr, setHeroDescAr] = useState('');
   const [heroDescEn, setHeroDescEn] = useState('');
   const [isSavingHero, setIsSavingHero] = useState(false);
+
+  // Navigation state for tabs
+  const [activeTab, setActiveTab] = useState<'platform' | 'social'>('platform');
+
+  // Social media settings state
+  const [socialMedia, setSocialMedia] = useState({
+    facebook: '',
+    instagram: '',
+    twitter: '',
+    linkedin: '',
+    telegram: ''
+  });
+  const [whatsappNumber, setWhatsappNumber] = useState('');
+  const [showWhatsappFloat, setShowWhatsappFloat] = useState(false);
+  const [isSavingSocial, setIsSavingSocial] = useState(false);
 
   // Helper: compress image to reduce size and dimensions
   const compressImage = async (
@@ -184,6 +206,7 @@ export default function InviteStudents() {
     checkFirestoreVerification();
     loadInvitationCode();
     loadBrandSettings();
+    loadSocialMediaSettings();
     loadStudents();
 
     return () => unsubscribe();
@@ -312,11 +335,20 @@ export default function InviteStudents() {
         setBrandLogoScale(clampScale((data.brandLogoScale as number) ?? 1));
         setBrandNameScale(clampScale((data.brandNameScale as number) ?? 1));
         
-        // Load hero settings
-        setHeroTitleAr((data.heroTitleAr as string) || 'منصة أكاديمية منارة');
-        setHeroTitleEn((data.heroTitleEn as string) || 'Manara Academy Platform');
-        setHeroDescAr((data.heroDescAr as string) || 'منصة تعليمية متقدمة لتطوير المهارات والمعرفة');
-        setHeroDescEn((data.heroDescEn as string) || 'Advanced learning platform for skill and knowledge development');
+        // Load hero settings (prefer nested inviteHero for compatibility with InvitePage)
+        const nestedHero = (data.inviteHero as any) || null;
+        if (nestedHero && typeof nestedHero === 'object') {
+          setHeroTitleAr((nestedHero.heroTitleAr as string) || 'منصة أكاديمية منارة');
+          setHeroTitleEn((nestedHero.heroTitleEn as string) || 'Manara Academy Platform');
+          setHeroDescAr((nestedHero.heroDescAr as string) || 'منصة تعليمية متقدمة لتطوير المهارات والمعرفة');
+          setHeroDescEn((nestedHero.heroDescEn as string) || 'Advanced learning platform for skill and knowledge development');
+        } else {
+          // Fallback to legacy top-level fields
+          setHeroTitleAr((data.heroTitleAr as string) || 'منصة أكاديمية منارة');
+          setHeroTitleEn((data.heroTitleEn as string) || 'Manara Academy Platform');
+          setHeroDescAr((data.heroDescAr as string) || 'منصة تعليمية متقدمة لتطوير المهارات والمعرفة');
+          setHeroDescEn((data.heroDescEn as string) || 'Advanced learning platform for skill and knowledge development');
+        }
       } else {
         setPlatformName(user?.displayName ? `منصة ${user.displayName}` : 'منصتي');
         // Set default hero values
@@ -426,19 +458,95 @@ export default function InviteStudents() {
     );
   };
 
-  const loadDashboardSettings = async () => {
+  // Load social media settings from Firestore
+  const loadSocialMediaSettings = async () => {
     if (!user) return;
-    
     try {
       const settingsDoc = await getDoc(doc(db, 'teacherSettings', user.uid));
       if (settingsDoc.exists()) {
-        const data = settingsDoc.data().studentDashboardSettings;
-        if (data) {
-          setDashboardSettings(data);
+        const data = settingsDoc.data();
+        if (data.socialMedia) {
+          setSocialMedia(data.socialMedia);
+        }
+        if (data.whatsappNumber) {
+          setWhatsappNumber(data.whatsappNumber);
+        }
+        if (data.showWhatsappFloat !== undefined) {
+          setShowWhatsappFloat(data.showWhatsappFloat);
         }
       }
     } catch (error) {
-      console.error('خطأ في تحميل إعدادات لوحة التحكم:', error);
+      console.error('خطأ في تحميل إعدادات وسائل التواصل:', error);
+    }
+  };
+
+  // Save social media settings to Firestore
+  const saveSocialMediaSettings = async () => {
+    if (!user) return;
+    try {
+      setIsSavingSocial(true);
+      await setDoc(
+        doc(db, 'teacherSettings', user.uid),
+        {
+          socialMedia,
+          updatedAt: new Date(),
+        },
+        { merge: true }
+      );
+      // Mirror social media to public teacher profile for invite page consumption
+      try {
+        await updateDoc(
+          doc(db, 'teachers', user.uid),
+          {
+            socialMedia: socialMedia || {},
+            updatedAt: new Date().toISOString()
+          }
+        );
+      } catch (e) {
+        console.warn('Failed to mirror social media to teacher profile', e);
+      }
+      toast.success(language === 'ar' ? 'تم حفظ وسائل التواصل' : 'Social media settings saved');
+    } catch (error) {
+      console.error('خطأ في حفظ وسائل التواصل:', error);
+      toast.error(language === 'ar' ? 'فشل في حفظ وسائل التواصل' : 'Failed to save social media settings');
+    } finally {
+      setIsSavingSocial(false);
+    }
+  };
+
+  // Save WhatsApp settings to Firestore
+  const saveWhatsAppSettings = async () => {
+    if (!user) return;
+    try {
+      setIsSavingSocial(true);
+      await setDoc(
+        doc(db, 'teacherSettings', user.uid),
+        {
+          whatsappNumber,
+          showWhatsappFloat,
+          updatedAt: new Date(),
+        },
+        { merge: true }
+      );
+      // Mirror WhatsApp settings to public teacher profile for invite page consumption
+      try {
+        await updateDoc(
+          doc(db, 'teachers', user.uid),
+          {
+            whatsappNumber: whatsappNumber || '',
+            showWhatsappFloat: !!showWhatsappFloat,
+            updatedAt: new Date().toISOString()
+          }
+        );
+      } catch (e) {
+        console.warn('Failed to mirror WhatsApp settings to teacher profile', e);
+      }
+      toast.success(language === 'ar' ? 'تم حفظ إعدادات واتساب' : 'WhatsApp settings saved');
+    } catch (error) {
+      console.error('خطأ في حفظ إعدادات واتساب:', error);
+      toast.error(language === 'ar' ? 'فشل في حفظ إعدادات واتساب' : 'Failed to save WhatsApp settings');
+    } finally {
+      setIsSavingSocial(false);
     }
   };
 
@@ -522,12 +630,14 @@ export default function InviteStudents() {
       setIsSavingHero(true);
       await setDoc(
         doc(db, 'teacherSettings', user.uid),
-        { 
-          heroTitleAr, 
-          heroTitleEn, 
-          heroDescAr, 
-          heroDescEn, 
-          updatedAt: new Date() 
+        {
+          inviteHero: {
+            heroTitleAr,
+            heroTitleEn,
+            heroDescAr,
+            heroDescEn,
+          },
+          updatedAt: new Date(),
         },
         { merge: true }
       );
@@ -538,6 +648,16 @@ export default function InviteStudents() {
     } finally {
       setIsSavingHero(false);
     }
+  };
+
+  // Open invite page with current teacher UID
+  const openInvitePage = () => {
+    if (!user?.uid) {
+      toast.error(language === 'ar' ? 'لم يتم التعرف على حساب المدرس' : 'Teacher account not recognized');
+      return;
+    }
+    const url = `${window.location.origin}/invite/${user.uid}`;
+    window.open(url, '_blank');
   };
 
   // Save custom invitation code
@@ -642,19 +762,39 @@ export default function InviteStudents() {
             {/* Page Header */}
             <div className="flex items-center gap-3 mb-6">
               <div className="w-10 h-10 bg-[#2c4656] rounded-lg flex items-center justify-center">
-                <UserPlus className="h-5 w-5 text-white" />
+                <Settings className="h-5 w-5 text-white" />
               </div>
               <div>
                 <h1 className="text-2xl font-bold text-gray-900">
-                  {language === 'ar' ? 'دعوة الطلاب' : 'Invite Students'}
+                  {language === 'ar' ? 'تخصيص المنصة' : 'Platform Customization'}
                 </h1>
                 <p className="text-gray-600">
                   {language === 'ar' 
-                    ? 'قم بإدارة وتخصيص منصتك: الشعار واسم المنصة' 
-                    : 'Manage and customize your platform: logo and name'
+                    ? 'قم بإدارة وتخصيص منصتك: الشعار واسم المنصة ووسائل التواصل' 
+                    : 'Manage and customize your platform: logo, name and social media'
                   }
                 </p>
               </div>
+            </div>
+
+            {/* Navigation Tabs */}
+            <div className="flex gap-2 mb-6">
+              <Button
+                variant={activeTab === 'platform' ? 'default' : 'outline'}
+                onClick={() => setActiveTab('platform')}
+                className={activeTab === 'platform' ? 'bg-[#2c4656] hover:bg-[#1e3240]' : ''}
+              >
+                <Settings className="h-4 w-4 mr-2" />
+                {language === 'ar' ? 'تخصيص المنصة' : 'Platform Customization'}
+              </Button>
+              <Button
+                variant={activeTab === 'social' ? 'default' : 'outline'}
+                onClick={() => setActiveTab('social')}
+                className={activeTab === 'social' ? 'bg-[#2c4656] hover:bg-[#1e3240]' : ''}
+              >
+                <MessageCircle className="h-4 w-4 mr-2" />
+                {language === 'ar' ? 'وسائل التواصل' : 'Social Media'}
+              </Button>
             </div>
 
             {/* Email Verification Message */}
@@ -677,231 +817,399 @@ export default function InviteStudents() {
             {/* Main Content with Disabled Effect */}
             <div className={!isEmailVerified ? 'opacity-50 pointer-events-none select-none' : ''}>
               
-              {/* Invitation Code Section has been removed as requested */}
+              {/* Platform Customization Tab */}
+              {activeTab === 'platform' && (
+                <>
+                  {/* Platform Branding Section */}
+                  <Card className="bg-white border-0 shadow-sm">
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <Edit className="h-5 w-5 text-[#2c4656]" />
+                        {language === 'ar' ? 'إدارة وتخصيص المنصة' : 'Platform Management and Customization'}
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-6">
+                      {/* Logo upload and preview + حجم */}
+                      <div className="flex items-center gap-4">
+                        <div className="w-16 h-16 rounded-lg border border-gray-200 bg-gray-50 flex items-center justify-center overflow-hidden">
+                          {platformLogoBase64 ? (
+                            <img src={platformLogoBase64} alt="شعار المنصة" className="w-full h-full object-cover" />
+                          ) : (
+                            <span className="text-gray-500 text-xs">{language === 'ar' ? 'لا يوجد شعار' : 'No logo'}</span>
+                          )}
+                        </div>
+                        <div>
+                          <input
+                            id="logo-input"
+                            ref={logoInputRef}
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={async (e) => {
+                              const file = e.target.files?.[0];
+                              if (file) await handleLogoUpload(file);
+                              // Clear value to allow re-uploading the same file and retrigger onChange
+                              e.currentTarget.value = '';
+                            }}
+                          />
+                          <Button
+                            disabled={isUploadingLogo}
+                            className="bg-[#2c4656] hover:bg-[#1e3240]"
+                            onClick={() => logoInputRef.current?.click()}
+                          >
+                            {isUploadingLogo
+                              ? (language === 'ar' ? 'جاري الرفع...' : 'Uploading...')
+                              : (language === 'ar' ? 'إضافة/تحديث الشعار' : 'Add/Update Logo')}
+                          </Button>
+                          <div className="mt-2 flex items-center gap-2">
+                            <Button variant="outline" size="sm" onClick={() => nudgeLogoScale(-0.1)}>-</Button>
+                            <div className="text-xs text-gray-600">{language === 'ar' ? 'حجم الشعار' : 'Logo size'}: ×{brandLogoScale.toFixed(1)}</div>
+                            <Button variant="outline" size="sm" onClick={() => nudgeLogoScale(+0.1)}>+</Button>
+                          </div>
+                        </div>
+                      </div>
 
-              {/* Platform Branding Section */}
-              <Card className="bg-white border-0 shadow-sm">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Edit className="h-5 w-5 text-[#2c4656]" />
-                    {language === 'ar' ? 'إدارة وتخصيص المنصة' : 'Platform Management and Customization'}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-6">
-                  {/* Logo upload and preview + حجم */}
-                  <div className="flex items-center gap-4">
-                    <div className="w-16 h-16 rounded-lg border border-gray-200 bg-gray-50 flex items-center justify-center overflow-hidden">
-                      {platformLogoBase64 ? (
-                        <img src={platformLogoBase64} alt="شعار المنصة" className="w-full h-full object-cover" />
-                      ) : (
-                        <span className="text-gray-500 text-xs">{language === 'ar' ? 'لا يوجد شعار' : 'No logo'}</span>
+                      {/* Platform name input */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
+                        <div>
+                          <Label htmlFor="platformName">
+                            {language === 'ar' ? 'اسم المنصة' : 'Platform Name'}
+                          </Label>
+                          <Input
+                            id="platformName"
+                            value={platformName}
+                            onChange={(e) => setPlatformName(e.target.value)}
+                            placeholder={language === 'ar' ? 'أدخل اسم منصتك' : 'Enter your platform name'}
+                            className="mt-2"
+                          />
+                        </div>
+                        <div className="flex gap-2 items-end">
+                          <div className="flex items-center gap-2 mr-2">
+                            <Button variant="outline" size="sm" onClick={() => nudgeNameScale(-0.1)}>-</Button>
+                            <div className="text-xs text-gray-600">{language === 'ar' ? 'حجم الاسم' : 'Name size'}: ×{brandNameScale.toFixed(1)}</div>
+                            <Button variant="outline" size="sm" onClick={() => nudgeNameScale(+0.1)}>+</Button>
+                          </div>
+                          <Button
+                            disabled={isSavingBrand}
+                            className="bg-[#2c4656] hover:bg-[#1e3240]"
+                            onClick={saveBrandSettings}
+                          >
+                            {isSavingBrand
+                              ? (language === 'ar' ? 'جاري التطبيق...' : 'Applying...')
+                              : (language === 'ar' ? 'تطبيق التغييرات' : 'Apply Changes')}
+                          </Button>
+                        </div>
+                      </div>
+                      <p className="text-xs text-gray-500">
+                        {language === 'ar'
+                          ? 'تنعكس تغييرات حجم الشعار والاسم في المعاينة فقط حتى تضغط "تطبيق التغييرات"، بعدها تظهر فوراً في صفحة الدعوة.'
+                          : 'Logo and name size changes affect the preview only until you click "Apply Changes", then they appear immediately on the invite page.'}
+                      </p>
+                    </CardContent>
+                  </Card>
+
+                  {/* Live Preview Section - header-only, live reflects draft changes */}
+                  <Card className="bg-white border-0 shadow-sm">
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <Palette className="h-5 w-5 text-[#2c4656]" />
+                        {language === 'ar' ? 'معاينة مباشرة' : 'Live Preview'}
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-sm text-gray-600 mb-4">
+                        {language === 'ar' 
+                          ? 'معاينة هيدر صفحة الدعوة فقط، تعكس تغييرات الاسم والشعار فوراً'
+                          : 'Header-only preview of the invite page; name and logo changes reflect instantly'
+                        }
+                      </p>
+                      <div className="rounded-lg overflow-hidden border border-gray-200 bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-gray-950 dark:to-gray-900">
+                        {/* Limit height to header area and prevent interactions */}
+                        <div className="relative h-24 sm:h-28 md:h-32 pointer-events-none">
+                          <InviteHeader
+                            teacherName={user.displayName || (language === 'ar' ? 'المدرس' : 'Teacher')}
+                            teacherPhotoURL={user.photoURL || undefined}
+                            brandLogo={platformLogoBase64 || ''}
+                            brandName={platformName || ''}
+                            brandLogoScale={brandLogoScale}
+                            brandNameScale={brandNameScale}
+                            showProfileAvatar={false}
+                            teacherId={user.uid}
+                          />
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  {/* Hero Editor Section with Live Preview */}
+                  <Card className="bg-white border-0 shadow-sm">
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <Edit className="h-5 w-5 text-[#2c4656]" />
+                        {language === 'ar' ? 'تحرير العنوان الرئيسي' : 'Hero Section Editor'}
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-6">
+                      {/* Hero Text Inputs */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <Label htmlFor="heroTitleAr">
+                            {language === 'ar' ? 'العنوان الرئيسي (عربي)' : 'Hero Title (Arabic)'}
+                          </Label>
+                          <Input
+                            id="heroTitleAr"
+                            value={heroTitleAr}
+                            onChange={(e) => setHeroTitleAr(e.target.value)}
+                            placeholder="منصة أكاديمية منارة"
+                            className="mt-2"
+                          />
+                        </div>
+                        <div>
+                          <Label htmlFor="heroTitleEn">
+                            {language === 'ar' ? 'العنوان الرئيسي (إنجليزي)' : 'Hero Title (English)'}
+                          </Label>
+                          <Input
+                            id="heroTitleEn"
+                            value={heroTitleEn}
+                            onChange={(e) => setHeroTitleEn(e.target.value)}
+                            placeholder="Manara Academy Platform"
+                            className="mt-2"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <Label htmlFor="heroDescAr">
+                            {language === 'ar' ? 'الوصف (عربي)' : 'Description (Arabic)'}
+                          </Label>
+                          <Input
+                            id="heroDescAr"
+                            value={heroDescAr}
+                            onChange={(e) => setHeroDescAr(e.target.value)}
+                            placeholder="منصة تعليمية متقدمة لتطوير المهارات والمعرفة"
+                            className="mt-2"
+                          />
+                        </div>
+                        <div>
+                          <Label htmlFor="heroDescEn">
+                            {language === 'ar' ? 'الوصف (إنجليزي)' : 'Description (English)'}
+                          </Label>
+                          <Input
+                            id="heroDescEn"
+                            value={heroDescEn}
+                            onChange={(e) => setHeroDescEn(e.target.value)}
+                            placeholder="Advanced learning platform for skill and knowledge development"
+                            className="mt-2"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="flex justify-end gap-2">
+                        <Button
+                          disabled={isSavingHero}
+                          className="bg-[#2c4656] hover:bg-[#1e3240]"
+                          onClick={saveHeroSettings}
+                        >
+                          {isSavingHero
+                            ? (language === 'ar' ? 'جاري الحفظ...' : 'Saving...')
+                            : (language === 'ar' ? 'حفظ إعدادات العنوان الرئيسي' : 'Save Hero Settings')}
+                        </Button>
+                        <Button
+                          variant="outline"
+                          onClick={openInvitePage}
+                        >
+                          {language === 'ar' ? 'عرض صفحة الدعوة' : 'Open Invite Page'}
+                        </Button>
+                      </div>
+
+                      {/* Live Hero Preview */}
+                      <div className="border-t pt-6">
+                        <h4 className="font-medium mb-4">
+                          {language === 'ar' ? 'معاينة مباشرة للعنوان الرئيسي' : 'Live Hero Preview'}
+                        </h4>
+                        <div className="rounded-lg overflow-hidden border border-gray-200">
+                          <InviteHero
+                            language={language}
+                            teacherFullName={user.displayName || (language === 'ar' ? 'المدرس' : 'Teacher')}
+                            teacherPhotoURL={user.photoURL || undefined}
+                            teacherId={user.uid}
+                            isAuthenticated={false}
+                            onSignOutClick={() => {}}
+                            heroTitleAr={heroTitleAr}
+                            heroTitleEn={heroTitleEn}
+                            heroDescAr={heroDescAr}
+                            heroDescEn={heroDescEn}
+                          />
+                        </div>
+                        <p className="text-xs text-gray-500 mt-2">
+                          {language === 'ar'
+                            ? 'المعاينة تعكس التغييرات فوراً. اضغط "حفظ" لتطبيق التغييرات على صفحة الدعوة.'
+                            : 'Preview reflects changes instantly. Click "Save" to apply changes to the invite page.'}
+                        </p>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </>
+              )}
+
+              {/* Social Media Tab */}
+              {activeTab === 'social' && (
+                <>
+                  {/* Social Media Links Section */}
+                  <Card className="bg-white border-0 shadow-sm">
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <MessageCircle className="h-5 w-5 text-[#2c4656]" />
+                        {language === 'ar' ? 'وسائل التواصل الاجتماعي' : 'Social Media Links'}
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-6">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {/* Facebook */}
+                        <div>
+                          <Label className="flex items-center gap-2">
+                            <Facebook className="h-4 w-4 text-blue-600" />
+                            {language === 'ar' ? 'فيسبوك' : 'Facebook'}
+                          </Label>
+                          <Input
+                            value={socialMedia.facebook}
+                            onChange={(e) => setSocialMedia(prev => ({ ...prev, facebook: e.target.value }))}
+                            placeholder={language === 'ar' ? 'رابط صفحة الفيسبوك' : 'Facebook page URL'}
+                            className="mt-2"
+                          />
+                        </div>
+
+                        {/* Instagram */}
+                        <div>
+                          <Label className="flex items-center gap-2">
+                            <Instagram className="h-4 w-4 text-pink-600" />
+                            {language === 'ar' ? 'انستجرام' : 'Instagram'}
+                          </Label>
+                          <Input
+                            value={socialMedia.instagram}
+                            onChange={(e) => setSocialMedia(prev => ({ ...prev, instagram: e.target.value }))}
+                            placeholder={language === 'ar' ? 'رابط حساب الانستجرام' : 'Instagram profile URL'}
+                            className="mt-2"
+                          />
+                        </div>
+
+                        {/* Twitter/X */}
+                        <div>
+                          <Label className="flex items-center gap-2">
+                            <Twitter className="h-4 w-4 text-blue-400" />
+                            {language === 'ar' ? 'تويتر / X' : 'Twitter / X'}
+                          </Label>
+                          <Input
+                            value={socialMedia.twitter}
+                            onChange={(e) => setSocialMedia(prev => ({ ...prev, twitter: e.target.value }))}
+                            placeholder={language === 'ar' ? 'رابط حساب تويتر' : 'Twitter profile URL'}
+                            className="mt-2"
+                          />
+                        </div>
+
+                        {/* LinkedIn */}
+                        <div>
+                          <Label className="flex items-center gap-2">
+                            <Linkedin className="h-4 w-4 text-blue-700" />
+                            {language === 'ar' ? 'لينكدان' : 'LinkedIn'}
+                          </Label>
+                          <Input
+                            value={socialMedia.linkedin}
+                            onChange={(e) => setSocialMedia(prev => ({ ...prev, linkedin: e.target.value }))}
+                            placeholder={language === 'ar' ? 'رابط حساب لينكدان' : 'LinkedIn profile URL'}
+                            className="mt-2"
+                          />
+                        </div>
+
+                        {/* Telegram */}
+                        <div>
+                          <Label className="flex items-center gap-2">
+                            <MessageCircle className="h-4 w-4 text-blue-500" />
+                            {language === 'ar' ? 'تيلجرام' : 'Telegram'}
+                          </Label>
+                          <Input
+                            value={socialMedia.telegram}
+                            onChange={(e) => setSocialMedia(prev => ({ ...prev, telegram: e.target.value }))}
+                            placeholder={language === 'ar' ? 'رابط قناة أو حساب تيلجرام' : 'Telegram channel/profile URL'}
+                            className="mt-2"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="flex justify-end">
+                        <Button
+                          disabled={isSavingSocial}
+                          className="bg-[#2c4656] hover:bg-[#1e3240]"
+                          onClick={saveSocialMediaSettings}
+                        >
+                          {isSavingSocial
+                            ? (language === 'ar' ? 'جاري الحفظ...' : 'Saving...')
+                            : (language === 'ar' ? 'حفظ وسائل التواصل' : 'Save Social Media')}
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  {/* WhatsApp Floating Button Section */}
+                  <Card className="bg-white border-0 shadow-sm">
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <Phone className="h-5 w-5 text-green-600" />
+                        {language === 'ar' ? 'أيقونة واتساب العائمة' : 'Floating WhatsApp Button'}
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-6">
+                      <div className="flex items-center gap-4">
+                        <div className="flex items-center space-x-2">
+                          <input
+                            type="checkbox"
+                            id="whatsapp-toggle"
+                            checked={showWhatsappFloat}
+                            onChange={(e) => setShowWhatsappFloat(e.target.checked)}
+                            className="rounded border-gray-300"
+                          />
+                          <Label htmlFor="whatsapp-toggle">
+                            {language === 'ar' ? 'تفعيل أيقونة واتساب العائمة' : 'Enable floating WhatsApp button'}
+                          </Label>
+                        </div>
+                      </div>
+
+                      {showWhatsappFloat && (
+                        <div>
+                          <Label htmlFor="whatsapp-number">
+                            {language === 'ar' ? 'رقم الهاتف (مع رمز الدولة)' : 'Phone Number (with country code)'}
+                          </Label>
+                          <Input
+                            id="whatsapp-number"
+                            value={whatsappNumber}
+                            onChange={(e) => setWhatsappNumber(e.target.value)}
+                            placeholder={language === 'ar' ? 'مثال: +966501234567' : 'Example: +966501234567'}
+                            className="mt-2"
+                          />
+                          <p className="text-xs text-gray-500 mt-1">
+                            {language === 'ar'
+                              ? 'أدخل رقم الهاتف مع رمز الدولة. عند الضغط على الأيقونة، سيتم توجيه الطالب إلى واتساب مباشرة.'
+                              : 'Enter phone number with country code. When clicked, students will be redirected to WhatsApp directly.'}
+                          </p>
+                        </div>
                       )}
-                    </div>
-                    <div>
-                      <input
-                        id="logo-input"
-                        ref={logoInputRef}
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        onChange={async (e) => {
-                          const file = e.target.files?.[0];
-                          if (file) await handleLogoUpload(file);
-                          // Clear value to allow re-uploading the same file and retrigger onChange
-                          e.currentTarget.value = '';
-                        }}
-                      />
-                      <Button
-                        disabled={isUploadingLogo}
-                        className="bg-[#2c4656] hover:bg-[#1e3240]"
-                        onClick={() => logoInputRef.current?.click()}
-                      >
-                        {isUploadingLogo
-                          ? (language === 'ar' ? 'جاري الرفع...' : 'Uploading...')
-                          : (language === 'ar' ? 'إضافة/تحديث الشعار' : 'Add/Update Logo')}
-                      </Button>
-                      <div className="mt-2 flex items-center gap-2">
-                        <Button variant="outline" size="sm" onClick={() => nudgeLogoScale(-0.1)}>-</Button>
-                        <div className="text-xs text-gray-600">{language === 'ar' ? 'حجم الشعار' : 'Logo size'}: ×{brandLogoScale.toFixed(1)}</div>
-                        <Button variant="outline" size="sm" onClick={() => nudgeLogoScale(+0.1)}>+</Button>
+
+                      <div className="flex justify-end">
+                        <Button
+                          disabled={isSavingSocial}
+                          className="bg-green-600 hover:bg-green-700"
+                          onClick={saveWhatsAppSettings}
+                        >
+                          {isSavingSocial
+                            ? (language === 'ar' ? 'جاري الحفظ...' : 'Saving...')
+                            : (language === 'ar' ? 'حفظ إعدادات واتساب' : 'Save WhatsApp Settings')}
+                        </Button>
                       </div>
-                    </div>
-                  </div>
-
-                  {/* Platform name input */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
-                    <div>
-                      <Label htmlFor="platformName">
-                        {language === 'ar' ? 'اسم المنصة' : 'Platform Name'}
-                      </Label>
-                      <Input
-                        id="platformName"
-                        value={platformName}
-                        onChange={(e) => setPlatformName(e.target.value)}
-                        placeholder={language === 'ar' ? 'أدخل اسم منصتك' : 'Enter your platform name'}
-                        className="mt-2"
-                      />
-                    </div>
-                    <div className="flex gap-2 items-end">
-                      <div className="flex items-center gap-2 mr-2">
-                        <Button variant="outline" size="sm" onClick={() => nudgeNameScale(-0.1)}>-</Button>
-                        <div className="text-xs text-gray-600">{language === 'ar' ? 'حجم الاسم' : 'Name size'}: ×{brandNameScale.toFixed(1)}</div>
-                        <Button variant="outline" size="sm" onClick={() => nudgeNameScale(+0.1)}>+</Button>
-                      </div>
-                      <Button
-                        disabled={isSavingBrand}
-                        className="bg-[#2c4656] hover:bg-[#1e3240]"
-                        onClick={saveBrandSettings}
-                      >
-                        {isSavingBrand
-                          ? (language === 'ar' ? 'جاري التطبيق...' : 'Applying...')
-                          : (language === 'ar' ? 'تطبيق التغييرات' : 'Apply Changes')}
-                      </Button>
-                    </div>
-                  </div>
-                  <p className="text-xs text-gray-500">
-                    {language === 'ar'
-                      ? 'تنعكس تغييرات حجم الشعار والاسم في المعاينة فقط حتى تضغط "تطبيق التغييرات"، بعدها تظهر فوراً في صفحة الدعوة.'
-                      : 'Logo and name size changes affect the preview only until you click "Apply Changes", then they appear immediately on the invite page.'}
-                  </p>
-                </CardContent>
-              </Card>
-
-              {/* Live Preview Section - header-only, live reflects draft changes */}
-              <Card className="bg-white border-0 shadow-sm">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Palette className="h-5 w-5 text-[#2c4656]" />
-                    {language === 'ar' ? 'معاينة مباشرة' : 'Live Preview'}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-sm text-gray-600 mb-4">
-                    {language === 'ar' 
-                      ? 'معاينة هيدر صفحة الدعوة فقط، تعكس تغييرات الاسم والشعار فوراً'
-                      : 'Header-only preview of the invite page; name and logo changes reflect instantly'
-                    }
-                  </p>
-                  <div className="rounded-lg overflow-hidden border border-gray-200 bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-gray-950 dark:to-gray-900">
-                    {/* Limit height to header area and prevent interactions */}
-                    <div className="relative h-24 sm:h-28 md:h-32 pointer-events-none">
-                      <InviteHeader
-                        teacherName={user.displayName || (language === 'ar' ? 'المدرس' : 'Teacher')}
-                        teacherPhotoURL={user.photoURL || undefined}
-                        brandLogo={platformLogoBase64 || ''}
-                        brandName={platformName || ''}
-                        brandLogoScale={brandLogoScale}
-                        brandNameScale={brandNameScale}
-                        showProfileAvatar={false}
-                        teacherId={user.uid}
-                      />
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Hero Editor Section with Live Preview */}
-              <Card className="bg-white border-0 shadow-sm">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Edit className="h-5 w-5 text-[#2c4656]" />
-                    {language === 'ar' ? 'تحرير العنوان الرئيسي' : 'Hero Section Editor'}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-6">
-                  {/* Hero Text Inputs */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <Label htmlFor="heroTitleAr">
-                        {language === 'ar' ? 'العنوان الرئيسي (عربي)' : 'Hero Title (Arabic)'}
-                      </Label>
-                      <Input
-                        id="heroTitleAr"
-                        value={heroTitleAr}
-                        onChange={(e) => setHeroTitleAr(e.target.value)}
-                        placeholder="منصة أكاديمية منارة"
-                        className="mt-2"
-                      />
-                    </div>
-                    <div>
-                      <Label htmlFor="heroTitleEn">
-                        {language === 'ar' ? 'العنوان الرئيسي (إنجليزي)' : 'Hero Title (English)'}
-                      </Label>
-                      <Input
-                        id="heroTitleEn"
-                        value={heroTitleEn}
-                        onChange={(e) => setHeroTitleEn(e.target.value)}
-                        placeholder="Manara Academy Platform"
-                        className="mt-2"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <Label htmlFor="heroDescAr">
-                        {language === 'ar' ? 'الوصف (عربي)' : 'Description (Arabic)'}
-                      </Label>
-                      <Input
-                        id="heroDescAr"
-                        value={heroDescAr}
-                        onChange={(e) => setHeroDescAr(e.target.value)}
-                        placeholder="منصة تعليمية متقدمة لتطوير المهارات والمعرفة"
-                        className="mt-2"
-                      />
-                    </div>
-                    <div>
-                      <Label htmlFor="heroDescEn">
-                        {language === 'ar' ? 'الوصف (إنجليزي)' : 'Description (English)'}
-                      </Label>
-                      <Input
-                        id="heroDescEn"
-                        value={heroDescEn}
-                        onChange={(e) => setHeroDescEn(e.target.value)}
-                        placeholder="Advanced learning platform for skill and knowledge development"
-                        className="mt-2"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="flex justify-end">
-                    <Button
-                      disabled={isSavingHero}
-                      className="bg-[#2c4656] hover:bg-[#1e3240]"
-                      onClick={saveHeroSettings}
-                    >
-                      {isSavingHero
-                        ? (language === 'ar' ? 'جاري الحفظ...' : 'Saving...')
-                        : (language === 'ar' ? 'حفظ إعدادات العنوان الرئيسي' : 'Save Hero Settings')}
-                    </Button>
-                  </div>
-
-                  {/* Live Hero Preview */}
-                  <div className="border-t pt-6">
-                    <h4 className="font-medium mb-4">
-                      {language === 'ar' ? 'معاينة مباشرة للعنوان الرئيسي' : 'Live Hero Preview'}
-                    </h4>
-                    <div className="rounded-lg overflow-hidden border border-gray-200">
-                      <InviteHero
-                        language={language}
-                        teacherName={user.displayName || (language === 'ar' ? 'المدرس' : 'Teacher')}
-                        teacherPhotoURL={user.photoURL}
-                        isAuthenticated={false}
-                        onSignOut={() => {}}
-                        heroTitleAr={heroTitleAr}
-                        heroTitleEn={heroTitleEn}
-                        heroDescAr={heroDescAr}
-                        heroDescEn={heroDescEn}
-                      />
-                    </div>
-                    <p className="text-xs text-gray-500 mt-2">
-                      {language === 'ar'
-                        ? 'المعاينة تعكس التغييرات فوراً. اضغط "حفظ" لتطبيق التغييرات على صفحة الدعوة.'
-                        : 'Preview reflects changes instantly. Click "Save" to apply changes to the invite page.'}
-                    </p>
-                  </div>
-                </CardContent>
-              </Card>
+                    </CardContent>
+                  </Card>
+                </>
+              )}
             </div>
           </div>
         </main>

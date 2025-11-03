@@ -237,6 +237,10 @@ service cloud.firestore {
       // السماح بإنشاء مستند إعدادات جديد للمدرس
       allow create: if request.auth != null && request.auth.uid == teacherId;
       
+      // السماح بقراءة إعدادات المدرسين للجميع (ضروري لصفحة الدعوة)
+      // هذا آمن لأن الإعدادات تحتوي فقط على معلومات العرض العامة
+      allow read: if true;
+      
       // السماح للأدمن بقراءة وكتابة جميع إعدادات المدرسين
       allow read, write: if request.auth != null && 
         exists(/databases/$(database)/documents/admins/$(request.auth.uid));

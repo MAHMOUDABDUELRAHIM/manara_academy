@@ -33,6 +33,13 @@ interface RegisterFormData {
 }
 
 export default function InvitePage() {
+  interface OverlayText {
+    id: string;
+    textAr?: string;
+    textEn?: string;
+    xPct: number;
+    yPct: number;
+  }
   const { teacherId } = useParams<{ teacherId: string }>()
   const navigate = useNavigate()
   const location = useLocation()
@@ -66,14 +73,25 @@ export default function InvitePage() {
   const [socialMedia, setSocialMedia] = useState<{ facebook?: string; instagram?: string; twitter?: string; linkedin?: string; telegram?: string }>({})
   // إعدادات واتساب العائم
   const [whatsappNumber, setWhatsappNumber] = useState<string>('')
+  // How Manara section customization states
+  const [featuresTitleAr, setFeaturesTitleAr] = useState<string>('إزاي منارة')
+  const [featuresTitleEn, setFeaturesTitleEn] = useState<string>('How Manara Helps')
+  const [inviteFeatures, setInviteFeatures] = useState<Array<{emoji: string; titleAr: string; titleEn: string; descAr: string; descEn: string}>>([])
   const [showWhatsappFloat, setShowWhatsappFloat] = useState<boolean>(false)
   // Editable hero texts from teacher settings
   const [heroTitleAr, setHeroTitleAr] = useState<string>('')
   const [heroTitleEn, setHeroTitleEn] = useState<string>('')
   const [heroDescAr, setHeroDescAr] = useState<string>('')
   const [heroDescEn, setHeroDescEn] = useState<string>('')
+  const [overlayTexts, setOverlayTexts] = useState<OverlayText[]>([])
+  const [heroAvatarBase64, setHeroAvatarBase64] = useState<string>('')
+  const [heroFrameStyle, setHeroFrameStyle] = useState<'circle' | 'rounded' | 'square' | 'hexagon' | 'diamond'>('circle')
+  const [heroTheme, setHeroTheme] = useState<'classic' | 'proBanner'>('classic')
   const [brandLogoScale, setBrandLogoScale] = useState<number>(1)
   const [brandNameScale, setBrandNameScale] = useState<number>(1)
+  // Readonly preview mode (opened from teacher editor)
+  const params = new URLSearchParams(location.search)
+  const isReadOnly = params.get('readonly') === '1' || params.get('readonly') === 'true'
 
 // Theme toggle handler
 const toggleTheme = () => setIsDark(v => !v)
@@ -158,6 +176,57 @@ useEffect(() => {
           if (typeof tWhats === 'string') setWhatsappNumber(tWhats)
           const tWhatsShow = !!(teacherData as any)?.showWhatsappFloat
           setShowWhatsappFloat(tWhatsShow)
+
+          // نصوص الهيرو من وثيقة المدرّس (تناغمًا مع سلوك اسم المنصة/الشعار)
+          const tHeroTitleAr = (teacherData as any)?.heroTitleAr as string | undefined
+          const tHeroTitleEn = (teacherData as any)?.heroTitleEn as string | undefined
+          const tHeroDescAr = (teacherData as any)?.heroDescAr as string | undefined
+          const tHeroDescEn = (teacherData as any)?.heroDescEn as string | undefined
+
+          if (tHeroTitleAr && tHeroTitleAr.trim().length > 0) setHeroTitleAr(tHeroTitleAr.trim())
+          if (tHeroTitleEn && tHeroTitleEn.trim().length > 0) setHeroTitleEn(tHeroTitleEn.trim())
+          if (tHeroDescAr && tHeroDescAr.trim().length > 0) setHeroDescAr(tHeroDescAr.trim())
+          if (tHeroDescEn && tHeroDescEn.trim().length > 0) setHeroDescEn(tHeroDescEn.trim())
+
+          // صورة الهيرو وإطارها من وثيقة المدرّس العامة (inviteHero)
+          const tInviteHero = (teacherData as any)?.inviteHero as any | undefined
+          if (tInviteHero && typeof tInviteHero === 'object') {
+            const av = typeof tInviteHero.avatarBase64 === 'string' ? tInviteHero.avatarBase64 : undefined
+            const fs = typeof tInviteHero.frameStyle === 'string' ? tInviteHero.frameStyle : undefined
+            const th = typeof tInviteHero.heroTheme === 'string' ? tInviteHero.heroTheme : undefined
+            if (av) setHeroAvatarBase64(av)
+            if (fs) setHeroFrameStyle(fs as any)
+            if (th && ['classic','proBanner'].includes(th)) setHeroTheme(th as any)
+            const ot = Array.isArray(tInviteHero.overlayTexts) ? tInviteHero.overlayTexts : []
+            if (ot) setOverlayTexts(ot as OverlayText[])
+          }
+          // بدائل من الحقول العليا إن وجدت
+          const avTopT = (teacherData as any)?.heroAvatarBase64 as string | undefined
+          if (avTopT) setHeroAvatarBase64(avTopT)
+          const fsTopT = (teacherData as any)?.heroFrameStyle as string | undefined
+          if (fsTopT) setHeroFrameStyle(fsTopT as any)
+          const thTopT = (teacherData as any)?.heroTheme as string | undefined
+          if (thTopT && ['classic','proBanner'].includes(thTopT)) setHeroTheme(thTopT as any)
+
+          // قسم "إزاي منارة" من وثيقة المدرّس العامة أولاً
+          const tInviteFeatures = (teacherData as any)?.inviteFeatures as any | undefined
+          if (tInviteFeatures && typeof tInviteFeatures === 'object') {
+            const sTitleAr = typeof tInviteFeatures.titleAr === 'string' ? tInviteFeatures.titleAr.trim() : ''
+            const sTitleEn = typeof tInviteFeatures.titleEn === 'string' ? tInviteFeatures.titleEn.trim() : ''
+            if (sTitleAr) setFeaturesTitleAr(sTitleAr)
+            if (sTitleEn) setFeaturesTitleEn(sTitleEn)
+            const items = Array.isArray(tInviteFeatures.items) ? tInviteFeatures.items : []
+            if (items.length > 0) {
+              const sanitized = items.map((it: any) => ({
+                emoji: typeof it.emoji === 'string' ? it.emoji : '✅',
+                titleAr: typeof it.titleAr === 'string' ? it.titleAr : '',
+                titleEn: typeof it.titleEn === 'string' ? it.titleEn : '',
+                descAr: typeof it.descAr === 'string' ? it.descAr : '',
+                descEn: typeof it.descEn === 'string' ? it.descEn : '',
+              }))
+              setInviteFeatures(sanitized)
+            }
+          }
         } catch {}
         // تحميل شعار العلامة من إعدادات المعلم
         try {
@@ -171,58 +240,100 @@ useEffect(() => {
             const logoScale = settingsDoc.data().brandLogoScale as number | undefined
             if (typeof logoScale === 'number') setBrandLogoScale(Math.min(3, Math.max(0.6, logoScale)))
             const nameScale = settingsDoc.data().brandNameScale as number | undefined
-            if (typeof nameScale === 'number') setBrandNameScale(Math.min(3, Math.max(0.6, nameScale)))
-            // Load social media links + WhatsApp float settings
-            const data = settingsDoc.data()
-            const sm = (data.socialMedia || {}) as { facebook?: string; instagram?: string; twitter?: string; linkedin?: string; telegram?: string }
-            setSocialMedia(sm)
-            const wa = (data.whatsappNumber as string) || ''
-            setWhatsappNumber(wa)
-            const waShow = !!data.showWhatsappFloat
-            setShowWhatsappFloat(waShow)
-            // Load hero section texts if available (prefer nested inviteHero, then fallback to top-level fields)
-            const inviteHero = data.inviteHero as any | undefined
-            let appliedHero = false
-            if (inviteHero && typeof inviteHero === 'object') {
-              const tAr = typeof inviteHero.heroTitleAr === 'string' ? inviteHero.heroTitleAr.trim() : undefined
-              const tEn = typeof inviteHero.heroTitleEn === 'string' ? inviteHero.heroTitleEn.trim() : undefined
-              const dAr = typeof inviteHero.heroDescAr === 'string' ? inviteHero.heroDescAr.trim() : undefined
-              const dEn = typeof inviteHero.heroDescEn === 'string' ? inviteHero.heroDescEn.trim() : undefined
+          if (typeof nameScale === 'number') setBrandNameScale(Math.min(3, Math.max(0.6, nameScale)))
+          // Load social media links + WhatsApp float settings
+          const data = settingsDoc.data()
+          const sm = (data.socialMedia || {}) as { facebook?: string; instagram?: string; twitter?: string; linkedin?: string; telegram?: string }
+          setSocialMedia(sm)
+          const wa = (data.whatsappNumber as string) || ''
+          setWhatsappNumber(wa)
+          const waShow = !!data.showWhatsappFloat
+          setShowWhatsappFloat(waShow)
+          // Load hero section texts if available (prefer nested inviteHero, then fallback to top-level fields)
+          const inviteHero = data.inviteHero as any | undefined
+          let appliedHero = false
+          if (inviteHero && typeof inviteHero === 'object') {
+            const tAr = typeof inviteHero.heroTitleAr === 'string' ? inviteHero.heroTitleAr.trim() : undefined
+            const tEn = typeof inviteHero.heroTitleEn === 'string' ? inviteHero.heroTitleEn.trim() : undefined
+            const dAr = typeof inviteHero.heroDescAr === 'string' ? inviteHero.heroDescAr.trim() : undefined
+            const dEn = typeof inviteHero.heroDescEn === 'string' ? inviteHero.heroDescEn.trim() : undefined
 
-              if (tAr && tAr.length > 0) { setHeroTitleAr(tAr); appliedHero = true }
-              if (tEn && tEn.length > 0) { setHeroTitleEn(tEn); appliedHero = true }
-              if (dAr && dAr.length > 0) { setHeroDescAr(dAr); appliedHero = true }
-              if (dEn && dEn.length > 0) { setHeroDescEn(dEn); appliedHero = true }
-              ;(window as any).__inviteHeroSource = 'nested'
-              ;(window as any).__inviteHeroValues = { tAr, tEn, dAr, dEn }
-            }
-            // Fallback: legacy top-level hero fields when nested inviteHero is missing or empty
-            if (!appliedHero) {
-              const tArTop = typeof data.heroTitleAr === 'string' ? data.heroTitleAr.trim() : undefined
-              const tEnTop = typeof data.heroTitleEn === 'string' ? data.heroTitleEn.trim() : undefined
-              const dArTop = typeof data.heroDescAr === 'string' ? data.heroDescAr.trim() : undefined
-              const dEnTop = typeof data.heroDescEn === 'string' ? data.heroDescEn.trim() : undefined
+            if (tAr && tAr.length > 0) { setHeroTitleAr(tAr); appliedHero = true }
+            if (tEn && tEn.length > 0) { setHeroTitleEn(tEn); appliedHero = true }
+            if (dAr && dAr.length > 0) { setHeroDescAr(dAr); appliedHero = true }
+            if (dEn && dEn.length > 0) { setHeroDescEn(dEn); appliedHero = true }
+            ;(window as any).__inviteHeroSource = 'nested'
+            ;(window as any).__inviteHeroValues = { tAr, tEn, dAr, dEn }
 
-              if (tArTop && tArTop.length > 0) setHeroTitleAr(tArTop)
-              if (tEnTop && tEnTop.length > 0) setHeroTitleEn(tEnTop)
-              if (dArTop && dArTop.length > 0) setHeroDescAr(dArTop)
-              if (dEnTop && dEnTop.length > 0) setHeroDescEn(dEnTop)
-              ;(window as any).__inviteHeroSource = 'top-level'
-              ;(window as any).__inviteHeroValues = { tArTop, tEnTop, dArTop, dEnTop }
-            }
-            // Final fallback from brand name if hero still empty (for robustness only)
-            if (!appliedHero) {
-              const bName = (data.platformName as string) || ''
-              if (bName) {
-                setHeroTitleAr(prev => prev || `منصة ${bName}`)
-                setHeroTitleEn(prev => prev || `platform ${bName}`)
-              }
-              ;(window as any).__inviteBrandName = bName
-            }
+            // قراءة صورة الهيرو وإطارها من inviteHero في إعدادات المعلم
+            const av = typeof inviteHero.avatarBase64 === 'string' ? inviteHero.avatarBase64 : undefined
+            const fs = typeof inviteHero.frameStyle === 'string' ? inviteHero.frameStyle : undefined
+            const th = typeof inviteHero.heroTheme === 'string' ? inviteHero.heroTheme : undefined
+            if (av) setHeroAvatarBase64(av)
+            if (fs) setHeroFrameStyle(fs as any)
+            if (th && ['classic','proBanner'].includes(th)) setHeroTheme(th as any)
+            const ot = Array.isArray(inviteHero.overlayTexts) ? inviteHero.overlayTexts : []
+            if (ot) setOverlayTexts(ot as OverlayText[])
           }
-        } catch (e) {
-          console.warn('Failed to load brand logo', e)
+          // Fallback: legacy top-level hero fields when nested inviteHero is missing or empty
+          if (!appliedHero) {
+            const tArTop = typeof data.heroTitleAr === 'string' ? data.heroTitleAr.trim() : undefined
+            const tEnTop = typeof data.heroTitleEn === 'string' ? data.heroTitleEn.trim() : undefined
+            const dArTop = typeof data.heroDescAr === 'string' ? data.heroDescAr.trim() : undefined
+            const dEnTop = typeof data.heroDescEn === 'string' ? data.heroDescEn.trim() : undefined
+
+            if (tArTop && tArTop.length > 0) setHeroTitleAr(tArTop)
+            if (tEnTop && tEnTop.length > 0) setHeroTitleEn(tEnTop)
+            if (dArTop && dArTop.length > 0) setHeroDescAr(dArTop)
+            if (dEnTop && dEnTop.length > 0) setHeroDescEn(dEnTop)
+            ;(window as any).__inviteHeroSource = 'top-level'
+            ;(window as any).__inviteHeroValues = { tArTop, tEnTop, dArTop, dEnTop }
+          }
+          // Final fallback from brand name if hero still empty (for robustness only)
+          if (!appliedHero) {
+            const bName = (data.platformName as string) || ''
+            if (bName) {
+              setHeroTitleAr(prev => prev || `منصة ${bName}`)
+              setHeroTitleEn(prev => prev || `platform ${bName}`)
+            }
+            ;(window as any).__inviteBrandName = bName
+          }
+
+          // بدائل إضافية لصورة الهيرو وإطاره من الحقول العليا في إعدادات المعلم
+          const avTop = typeof (data as any).heroAvatarBase64 === 'string' ? (data as any).heroAvatarBase64 : undefined
+          const fsTop = typeof (data as any).heroFrameStyle === 'string' ? (data as any).heroFrameStyle : undefined
+          const thTop = typeof (data as any).heroTheme === 'string' ? (data as any).heroTheme : undefined
+          if (avTop) setHeroAvatarBase64(avTop)
+          if (fsTop) setHeroFrameStyle(fsTop as any)
+          if (thTop && ['classic','proBanner'].includes(thTop)) setHeroTheme(thTop as any)
+
+          // Load How Manara section customization from teacherSettings
+          try {
+            const section = (data.inviteFeatures as any) || null
+            if (section && typeof section === 'object') {
+              const sTitleAr = typeof section.titleAr === 'string' ? section.titleAr.trim() : ''
+              const sTitleEn = typeof section.titleEn === 'string' ? section.titleEn.trim() : ''
+              if (sTitleAr) setFeaturesTitleAr(sTitleAr)
+              if (sTitleEn) setFeaturesTitleEn(sTitleEn)
+              const items: any[] = Array.isArray(section.items) ? section.items : []
+              if (items.length > 0) {
+                const sanitized = items.map((it: any) => ({
+                  emoji: typeof it.emoji === 'string' ? it.emoji : '✅',
+                  titleAr: typeof it.titleAr === 'string' ? it.titleAr : '',
+                  titleEn: typeof it.titleEn === 'string' ? it.titleEn : '',
+                  descAr: typeof it.descAr === 'string' ? it.descAr : '',
+                  descEn: typeof it.descEn === 'string' ? it.descEn : '',
+                }))
+                setInviteFeatures(sanitized)
+              }
+            }
+          } catch (e2) {
+            console.warn('Failed to load invite features section', e2)
+          }
         }
+      } catch (e) {
+        console.warn('Failed to load brand logo', e)
+      }
 
         // Fetch teacher courses
         try {
@@ -486,6 +597,16 @@ useEffect(() => {
           </div>
         </div>
       </header>
+      {/* Readonly overlay to block interactions when previewed from editor */}
+      {isReadOnly && (
+        <div
+          className="fixed inset-0 z-[100]"
+          style={{ background: 'transparent' }}
+          onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
+          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+          onMouseUp={(e) => { e.preventDefault(); e.stopPropagation(); }}
+        />
+      )}
       {/* Hero Section (reusable component) */}
       <InviteHero
         language={language}
@@ -498,6 +619,10 @@ useEffect(() => {
         heroTitleEn={heroTitleEn}
         heroDescAr={heroDescAr}
         heroDescEn={heroDescEn}
+        heroAvatarBase64={heroAvatarBase64}
+        frameStyle={heroFrameStyle}
+        heroTheme={heroTheme}
+        overlayTexts={overlayTexts}
       />
 
       {/* Main content with teacher info and published courses */}
@@ -542,42 +667,19 @@ useEffect(() => {
           </div>
         )}
       </main>
-      {/* Features section */}
+      {/* Features section (customizable) */}
       <section className="bg-white dark:bg-gray-950 py-14">
         <div className="max-w-6xl mx-auto px-4 text-center">
-          <h2 className="text-3xl font-bold mb-2 text-gray-900 dark:text-white">{language === 'ar' ? 'إزاي منارة' : 'How Manara Helps'}</h2>
+          <h2 className="text-3xl font-bold mb-2 text-gray-900 dark:text-white">{language === 'ar' ? featuresTitleAr : featuresTitleEn}</h2>
           <div className="w-24 h-1 bg-blue-500 dark:bg-blue-400 mx-auto mb-8 rounded"></div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-            {[{
-              key: 'practice',
-              emoji: '📝',
-              titleAr: 'هتتـــرب',
-              titleEn: 'Practice',
-              descAr: 'امتحانات إلكترونية تقدر تعيدها لحد ما تتقنها',
-              descEn: 'Online exams you can repeat until you master them'
-            },{
-              key: 'plan',
-              emoji: '🗺️',
-              titleAr: 'هتجهــزك',
-              titleEn: 'Prepare',
-              descAr: 'مش محتاج تسأل هتذاكر إيه النهاردة. إحنا مجهزين لك',
-              descEn: "No need to ask what to study today; we're ready for you"
-            },{
-              key: 'measure',
-              emoji: '🎯',
-              titleAr: 'هتتقــاس',
-              titleEn: 'Measure',
-              descAr: 'نظام نقاط على كل حاجة بأفكارها ومهامها للطلبة',
-              descEn: 'Point system across tasks and ideas to measure progress'
-            },{
-              key: 'share',
-              emoji: '💬',
-              titleAr: 'هتشــارك',
-              titleEn: 'Share',
-              descAr: 'مجموعات للمناقشة عشان تسأل وتشارك أفكارك مع زمايلك',
-              descEn: 'Discussion groups to ask and share ideas with peers'
-            }].map((f) => (
-              <div key={f.key} className="rounded-2xl bg-blue-50 dark:bg-gray-900 border border-blue-100 dark:border-gray-800 p-6 shadow-sm">
+            {(inviteFeatures.length > 0 ? inviteFeatures : [
+              { emoji: '📝', titleAr: 'هتتـــرب', titleEn: 'Practice', descAr: 'امتحانات إلكترونية تقدر تعيدها لحد ما تتقنها', descEn: 'Online exams you can repeat until you master them' },
+              { emoji: '🗺️', titleAr: 'هتجهــزك', titleEn: 'Prepare', descAr: 'مش محتاج تسأل هتذاكر إيه النهاردة. إحنا مجهزين لك', descEn: "No need to ask what to study today; we're ready for you" },
+              { emoji: '🎯', titleAr: 'هتتقــاس', titleEn: 'Measure', descAr: 'نظام نقاط على كل حاجة بأفكارها ومهامها للطلبة', descEn: 'Point system across tasks and ideas to measure progress' },
+              { emoji: '💬', titleAr: 'هتشــارك', titleEn: 'Share', descAr: 'مجموعات للمناقشة عشان تسأل وتشارك أفكارك مع زمايلك', descEn: 'Discussion groups to ask and share ideas with peers' },
+            ]).map((f, idx) => (
+              <div key={idx} className="rounded-2xl bg-blue-50 dark:bg-gray-900 border border-blue-100 dark:border-gray-800 p-6 shadow-sm">
                 <div className="text-3xl mb-3">{f.emoji}</div>
                 <div className="font-bold text-xl text-blue-700 dark:text-blue-400 mb-2">{language === 'ar' ? f.titleAr : f.titleEn}</div>
                 <p className="text-sm text-gray-700 dark:text-gray-300">{language === 'ar' ? f.descAr : f.descEn}</p>

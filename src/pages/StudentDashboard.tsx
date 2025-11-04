@@ -27,7 +27,8 @@ import {
   Copy,
   Check,
   Calendar,
-  CreditCard
+  CreditCard,
+  MessageCircle
 } from "lucide-react";
 import { DashboardHeader } from "@/components/DashboardHeader";
 
@@ -167,6 +168,9 @@ const [dashboardTheme, setDashboardTheme] = useState<'proA' | 'proB' | 'modernLi
   const [brandName, setBrandName] = useState<string>('');
   const [brandLogoScale, setBrandLogoScale] = useState<number>(1);
   const [brandNameScale, setBrandNameScale] = useState<number>(1);
+  // إعدادات واتساب (رقم وإظهار الزر العائم)
+  const [whatsappNumber, setWhatsappNumber] = useState<string>('');
+  const [showWhatsappFloat, setShowWhatsappFloat] = useState<boolean>(false);
 // إضافة حالة لأوقات محاولات الامتحان
 const [examAttempts, setExamAttempts] = useState<Record<string, { startAt?: Date; submittedAt?: Date }>>({});
 // دالة تنسيق مدة الزمن المستهلكة
@@ -347,6 +351,14 @@ const formatDuration = (ms: number) => {
             if (teacherBrandName) setBrandName(teacherBrandName);
           } catch {}
 
+          // رقم واتساب وإعداد إظهار الزر العائم من ملف المدرس العام
+          try {
+            const tWhats = (teacher as any)?.whatsappNumber as string | undefined;
+            if (tWhats) setWhatsappNumber(tWhats);
+            const tShowFloat = (teacher as any)?.showWhatsappFloat as boolean | undefined;
+            if (typeof tShowFloat === 'boolean') setShowWhatsappFloat(tShowFloat);
+          } catch {}
+
           // تحميل ثيم لوحة التحكم للطالب من إعدادات المعلم
           try {
             const settingsDoc = await getDoc(doc(db, 'teacherSettings', teacher.id));
@@ -366,6 +378,12 @@ const formatDuration = (ms: number) => {
               if (typeof logoScale === 'number') setBrandLogoScale(Math.min(3, Math.max(0.6, logoScale)));
               const nameScale = settingsDoc.data().brandNameScale as number | undefined;
               if (typeof nameScale === 'number') setBrandNameScale(Math.min(3, Math.max(0.6, nameScale)));
+
+              // إعدادات واتساب من إعدادات المعلم (كبديل)
+              const sdWhats = settingsDoc.data().whatsappNumber as string | undefined;
+              if (!whatsappNumber && sdWhats) setWhatsappNumber(sdWhats);
+              const sdShowFloat = settingsDoc.data().showWhatsappFloat as boolean | undefined;
+              if (typeof sdShowFloat === 'boolean') setShowWhatsappFloat(sdShowFloat);
             }
           } catch (e) {
             console.warn('Failed to load dashboard theme', e);
@@ -674,6 +692,10 @@ const formatDuration = (ms: number) => {
     : dashboardTheme === 'modernLight'
     ? '#FBBF24'
     : '#10b981';
+
+  // تهيئة رقم واتساب والتحقق من إظهار الزر
+  const normalizedWhatsapp = (whatsappNumber || '').replace(/[^+\d]/g, '');
+  const shouldShowWhatsapp = !!showWhatsappFloat && !!normalizedWhatsapp;
 
   const handleNotificationItemClick = (n: any) => {
     try {
@@ -1614,8 +1636,19 @@ const formatDuration = (ms: number) => {
            © Manara Academy 2025 - جميع الحقوق محفوظة
          </div>
        </footer>
-     </div>
-   );
- };
+      {shouldShowWhatsapp && (
+        <a
+          href={`https://wa.me/${normalizedWhatsapp}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="fixed bottom-6 right-6 z-50 inline-flex items-center justify-center w-14 h-14 rounded-full bg-green-500 hover:bg-green-600 shadow-lg text-white"
+          aria-label={language === 'ar' ? 'تواصل عبر واتساب' : 'Contact via WhatsApp'}
+        >
+          <MessageCircle className="w-7 h-7" />
+        </a>
+      )}
+      </div>
+    );
+  };
 
 export default StudentDashboard;

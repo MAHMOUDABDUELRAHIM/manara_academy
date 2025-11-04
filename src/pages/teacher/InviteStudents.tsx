@@ -17,6 +17,7 @@ import {
   Check,
   AlertCircle,
   Edit,
+  Eye,
   X,
   UserPlus,
   Facebook,
@@ -25,7 +26,9 @@ import {
   Linkedin,
   MessageCircle,
   Phone,
-  Settings
+  Settings,
+  Type,
+  ChevronDown
 } from 'lucide-react';
 import { sendEmailVerification, onAuthStateChanged } from 'firebase/auth';
 import { doc, getDoc, setDoc, updateDoc, collection, query, where, getDocs, deleteDoc } from 'firebase/firestore';
@@ -45,6 +48,13 @@ interface Student {
 }
 
 export default function InviteStudents() {
+  interface OverlayText {
+    id: string;
+    textAr?: string;
+    textEn?: string;
+    xPct: number; // 0-100 percentage from left
+    yPct: number; // 0-100 percentage from top
+  }
   const { user } = useAuth();
   const { language } = useLanguage();
   const [isEmailVerified, setIsEmailVerified] = useState(false);
@@ -74,7 +84,87 @@ export default function InviteStudents() {
   const [heroTitleEn, setHeroTitleEn] = useState('');
   const [heroDescAr, setHeroDescAr] = useState('');
   const [heroDescEn, setHeroDescEn] = useState('');
+  const [heroTheme, setHeroTheme] = useState<'classic' | 'proBanner'>('classic');
+  const [heroAvatarBase64, setHeroAvatarBase64] = useState<string>('');
+  const [heroFrameStyle, setHeroFrameStyle] = useState<'circle' | 'rounded' | 'square' | 'hexagon' | 'diamond'>('circle');
   const [isSavingHero, setIsSavingHero] = useState(false);
+  const [overlayTexts, setOverlayTexts] = useState<OverlayText[]>([]);
+
+  // Toolbar component: theme toggle + add text inside bordered rounded container
+  const HeroToolbar: React.FC<{
+    language: 'ar' | 'en';
+    heroTheme: 'classic' | 'proBanner';
+    onThemeChange: (t: 'classic' | 'proBanner') => void;
+  }> = ({ language, heroTheme, onThemeChange }) => {
+    const [open, setOpen] = useState(false);
+    return (
+      <div className="relative inline-flex items-center gap-2 border border-gray-300 rounded-xl px-3 py-1 bg-transparent">
+        <button
+          type="button"
+          className="inline-flex items-center gap-1 text-[#2c4656] hover:text-[#1e3240]"
+          onClick={() => setOpen(v => !v)}
+          aria-label={language === 'ar' ? 'الثيم' : 'Theme'}
+        >
+          <Palette className="w-5 h-5" />
+          <span className="text-sm">{language === 'ar' ? 'الثيم' : 'Theme'}</span>
+          <ChevronDown className="w-4 h-4" />
+        </button>
+        {open && (
+          <div className="absolute z-30 top-full mt-2 right-0 bg-white border border-gray-200 rounded-md shadow p-2 min-w-[180px]">
+            <button
+              className={`block w-full text-right px-3 py-2 rounded ${heroTheme === 'classic' ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-100'}`}
+              onClick={() => { onThemeChange('classic'); setOpen(false); }}
+            >
+              {language === 'ar' ? 'كلاسيكي (نص + إطار)' : 'Classic (Text + Frame)'}
+            </button>
+            <button
+              className={`block w-full text-right px-3 py-2 rounded ${heroTheme === 'proBanner' ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-100'}`}
+              onClick={() => { onThemeChange('proBanner'); setOpen(false); }}
+            >
+              {language === 'ar' ? 'بانر احترافي' : 'Professional Banner'}
+            </button>
+          </div>
+        )}
+        {/* تمت إزالة زر إضافة نص بناءً على طلبك */}
+      </div>
+    );
+  };
+
+  // "How Manara" section customization state
+  const defaultInviteFeatures = [
+    {
+      emoji: '📝',
+      titleAr: 'هتتـــرب',
+      titleEn: 'Practice',
+      descAr: 'امتحانات إلكترونية تقدر تعيدها لحد ما تتقنها',
+      descEn: 'Online exams you can repeat until you master them',
+    },
+    {
+      emoji: '🗺️',
+      titleAr: 'هتجهــزك',
+      titleEn: 'Prepare',
+      descAr: 'مش محتاج تسأل هتذاكر إيه النهاردة. إحنا مجهزين لك',
+      descEn: "No need to ask what to study today; we're ready for you",
+    },
+    {
+      emoji: '🎯',
+      titleAr: 'هتتقــاس',
+      titleEn: 'Measure',
+      descAr: 'نظام نقاط على كل حاجة بأفكارها ومهامها للطلبة',
+      descEn: 'Point system across tasks and ideas to measure progress',
+    },
+    {
+      emoji: '💬',
+      titleAr: 'هتشــارك',
+      titleEn: 'Share',
+      descAr: 'مجموعات للمناقشة عشان تسأل وتشارك أفكارك مع زمايلك',
+      descEn: 'Discussion groups to ask and share ideas with peers',
+    },
+  ];
+  const [featuresTitleAr, setFeaturesTitleAr] = useState<string>('إزاي منارة');
+  const [featuresTitleEn, setFeaturesTitleEn] = useState<string>('How Manara Helps');
+  const [inviteFeatures, setInviteFeatures] = useState<typeof defaultInviteFeatures>(defaultInviteFeatures);
+  const [isSavingInviteFeatures, setIsSavingInviteFeatures] = useState(false);
 
   // Navigation state for tabs
   const [activeTab, setActiveTab] = useState<'platform' | 'social'>('platform');
@@ -207,6 +297,7 @@ export default function InviteStudents() {
     loadInvitationCode();
     loadBrandSettings();
     loadSocialMediaSettings();
+    loadInviteFeatures();
     loadStudents();
 
     return () => unsubscribe();
@@ -342,6 +433,15 @@ export default function InviteStudents() {
           setHeroTitleEn((nestedHero.heroTitleEn as string) || 'Manara Academy Platform');
           setHeroDescAr((nestedHero.heroDescAr as string) || 'منصة تعليمية متقدمة لتطوير المهارات والمعرفة');
           setHeroDescEn((nestedHero.heroDescEn as string) || 'Advanced learning platform for skill and knowledge development');
+          setHeroAvatarBase64((nestedHero.avatarBase64 as string) || '');
+          const style = (nestedHero.frameStyle as string) || 'circle';
+          if (['circle','rounded','square','hexagon','diamond'].includes(style)) {
+            setHeroFrameStyle(style as any);
+          }
+          const theme = (nestedHero.heroTheme as string) || 'classic';
+          if (['classic','proBanner'].includes(theme)) {
+            setHeroTheme(theme as any);
+          }
         } else {
           // Fallback to legacy top-level fields
           setHeroTitleAr((data.heroTitleAr as string) || 'منصة أكاديمية منارة');
@@ -359,6 +459,37 @@ export default function InviteStudents() {
       }
     } catch (error) {
       console.error('خطأ في تحميل إعدادات العلامة التجارية:', error);
+    }
+  };
+
+  // Load "How Manara" features from Firestore
+  const loadInviteFeatures = async () => {
+    if (!user) return;
+    try {
+      const settingsDoc = await getDoc(doc(db, 'teacherSettings', user.uid));
+      if (settingsDoc.exists()) {
+        const data = settingsDoc.data();
+        const section = (data.inviteFeatures as any) || null;
+        if (section && typeof section === 'object') {
+          const tAr = typeof section.titleAr === 'string' ? section.titleAr.trim() : '';
+          const tEn = typeof section.titleEn === 'string' ? section.titleEn.trim() : '';
+          if (tAr) setFeaturesTitleAr(tAr);
+          if (tEn) setFeaturesTitleEn(tEn);
+          const items = Array.isArray(section.items) ? section.items : [];
+          if (items.length > 0) {
+            const sanitized = items.map((it: any) => ({
+              emoji: typeof it.emoji === 'string' ? it.emoji : '✅',
+              titleAr: typeof it.titleAr === 'string' ? it.titleAr : '',
+              titleEn: typeof it.titleEn === 'string' ? it.titleEn : '',
+              descAr: typeof it.descAr === 'string' ? it.descAr : '',
+              descEn: typeof it.descEn === 'string' ? it.descEn : '',
+            }));
+            setInviteFeatures(sanitized);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('خطأ في تحميل ميزات "إزاي منارة":', error);
     }
   };
 
@@ -636,11 +767,42 @@ export default function InviteStudents() {
             heroTitleEn,
             heroDescAr,
             heroDescEn,
+            avatarBase64: heroAvatarBase64 || '',
+            frameStyle: heroFrameStyle || 'circle',
+            heroTheme: heroTheme || 'classic',
+            overlayTexts: overlayTexts,
           },
           updatedAt: new Date(),
         },
         { merge: true }
       );
+      // Mirror hero settings to public teacher profile for student-facing invite page consumption
+      try {
+        await updateDoc(doc(db, 'teachers', user.uid), {
+          heroTitleAr: heroTitleAr || '',
+          heroTitleEn: heroTitleEn || '',
+          heroDescAr: heroDescAr || '',
+          heroDescEn: heroDescEn || '',
+          // Also store avatar/frame for direct consumption
+          heroAvatarBase64: heroAvatarBase64 || '',
+          heroFrameStyle: heroFrameStyle || 'circle',
+          heroTheme: heroTheme || 'classic',
+          // Nested object for future compatibility
+          inviteHero: {
+            heroTitleAr: heroTitleAr || '',
+            heroTitleEn: heroTitleEn || '',
+            heroDescAr: heroDescAr || '',
+            heroDescEn: heroDescEn || '',
+            avatarBase64: heroAvatarBase64 || '',
+            frameStyle: heroFrameStyle || 'circle',
+            heroTheme: heroTheme || 'classic',
+            overlayTexts: overlayTexts,
+          },
+          updatedAt: new Date().toISOString(),
+        });
+      } catch (e) {
+        console.warn('Failed to mirror hero settings to teacher profile', e);
+      }
       toast.success(language === 'ar' ? 'تم حفظ إعدادات العنوان الرئيسي' : 'Hero settings saved');
     } catch (error) {
       console.error('خطأ في حفظ إعدادات العنوان الرئيسي:', error);
@@ -650,13 +812,55 @@ export default function InviteStudents() {
     }
   };
 
+  // Save "How Manara" features to Firestore
+  const saveInviteFeatures = async () => {
+    if (!user) return;
+    try {
+      setIsSavingInviteFeatures(true);
+      await setDoc(
+        doc(db, 'teacherSettings', user.uid),
+        {
+          inviteFeatures: {
+            titleAr: featuresTitleAr,
+            titleEn: featuresTitleEn,
+            items: inviteFeatures,
+          },
+          updatedAt: new Date(),
+        },
+        { merge: true }
+      );
+      // Mirror How Manara section to public teacher profile for invite page consumption
+      try {
+        await updateDoc(
+          doc(db, 'teachers', user.uid),
+          {
+            inviteFeatures: {
+              titleAr: featuresTitleAr || '',
+              titleEn: featuresTitleEn || '',
+              items: inviteFeatures || []
+            },
+            updatedAt: new Date().toISOString()
+          }
+        );
+      } catch (e) {
+        console.warn('Failed to mirror inviteFeatures to teacher profile', e);
+      }
+      toast.success(language === 'ar' ? 'تم حفظ قسم إزاي منارة' : 'How Manara section saved');
+    } catch (error) {
+      console.error('خطأ في حفظ قسم إزاي منارة:', error);
+      toast.error(language === 'ar' ? 'فشل في حفظ قسم إزاي منارة' : 'Failed to save How Manara section');
+    } finally {
+      setIsSavingInviteFeatures(false);
+    }
+  };
+
   // Open invite page with current teacher UID
   const openInvitePage = () => {
     if (!user?.uid) {
       toast.error(language === 'ar' ? 'لم يتم التعرف على حساب المدرس' : 'Teacher account not recognized');
       return;
     }
-    const url = `${window.location.origin}/invite/${user.uid}`;
+    const url = `${window.location.origin}/invite/${user.uid}?readonly=1`;
     window.open(url, '_blank');
   };
 
@@ -950,103 +1154,195 @@ export default function InviteStudents() {
                       </CardTitle>
                     </CardHeader>
                     <CardContent className="space-y-6">
-                      {/* Hero Text Inputs */}
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <Label htmlFor="heroTitleAr">
-                            {language === 'ar' ? 'العنوان الرئيسي (عربي)' : 'Hero Title (Arabic)'}
-                          </Label>
-                          <Input
-                            id="heroTitleAr"
-                            value={heroTitleAr}
-                            onChange={(e) => setHeroTitleAr(e.target.value)}
-                            placeholder="منصة أكاديمية منارة"
-                            className="mt-2"
-                          />
-                        </div>
-                        <div>
-                          <Label htmlFor="heroTitleEn">
-                            {language === 'ar' ? 'العنوان الرئيسي (إنجليزي)' : 'Hero Title (English)'}
-                          </Label>
-                          <Input
-                            id="heroTitleEn"
-                            value={heroTitleEn}
-                            onChange={(e) => setHeroTitleEn(e.target.value)}
-                            placeholder="Manara Academy Platform"
-                            className="mt-2"
-                          />
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <Label htmlFor="heroDescAr">
-                            {language === 'ar' ? 'الوصف (عربي)' : 'Description (Arabic)'}
-                          </Label>
-                          <Input
-                            id="heroDescAr"
-                            value={heroDescAr}
-                            onChange={(e) => setHeroDescAr(e.target.value)}
-                            placeholder="منصة تعليمية متقدمة لتطوير المهارات والمعرفة"
-                            className="mt-2"
-                          />
-                        </div>
-                        <div>
-                          <Label htmlFor="heroDescEn">
-                            {language === 'ar' ? 'الوصف (إنجليزي)' : 'Description (English)'}
-                          </Label>
-                          <Input
-                            id="heroDescEn"
-                            value={heroDescEn}
-                            onChange={(e) => setHeroDescEn(e.target.value)}
-                            placeholder="Advanced learning platform for skill and knowledge development"
-                            className="mt-2"
-                          />
-                        </div>
-                      </div>
-
-                      <div className="flex justify-end gap-2">
-                        <Button
-                          disabled={isSavingHero}
-                          className="bg-[#2c4656] hover:bg-[#1e3240]"
-                          onClick={saveHeroSettings}
-                        >
-                          {isSavingHero
-                            ? (language === 'ar' ? 'جاري الحفظ...' : 'Saving...')
-                            : (language === 'ar' ? 'حفظ إعدادات العنوان الرئيسي' : 'Save Hero Settings')}
-                        </Button>
-                        <Button
-                          variant="outline"
-                          onClick={openInvitePage}
-                        >
-                          {language === 'ar' ? 'عرض صفحة الدعوة' : 'Open Invite Page'}
-                        </Button>
-                      </div>
-
-                      {/* Live Hero Preview */}
-                      <div className="border-t pt-6">
-                        <h4 className="font-medium mb-4">
-                          {language === 'ar' ? 'معاينة مباشرة للعنوان الرئيسي' : 'Live Hero Preview'}
-                        </h4>
-                        <div className="rounded-lg overflow-hidden border border-gray-200">
-                          <InviteHero
+                      {/* Editable Live Hero Preview (structure identical to InvitePage via InviteHero) */}
+                      <div className="rounded-lg overflow-hidden border border-gray-200">
+                        {/* Action buttons inside the editable box */}
+                        <div className="flex justify-end gap-2 p-2 bg-white/60">
+                          {/* Theme + Add Text group inside rounded hollow rectangle */}
+                          <HeroToolbar
                             language={language}
-                            teacherFullName={user.displayName || (language === 'ar' ? 'المدرس' : 'Teacher')}
-                            teacherPhotoURL={user.photoURL || undefined}
-                            teacherId={user.uid}
-                            isAuthenticated={false}
-                            onSignOutClick={() => {}}
-                            heroTitleAr={heroTitleAr}
-                            heroTitleEn={heroTitleEn}
-                            heroDescAr={heroDescAr}
-                            heroDescEn={heroDescEn}
+                            heroTheme={heroTheme}
+                            onThemeChange={(t) => setHeroTheme(t)}
                           />
+                          <Button
+                            disabled={isSavingHero}
+                            className="bg-[#2c4656] hover:bg-[#1e3240]"
+                            onClick={saveHeroSettings}
+                          >
+                            {isSavingHero
+                              ? (language === 'ar' ? 'جاري الحفظ...' : 'Saving...')
+                              : (language === 'ar' ? 'حفظ التعديلات' : 'Save Changes')}
+                          </Button>
+                          <Button
+                            variant="outline"
+                            onClick={openInvitePage}
+                            aria-label={language === 'ar' ? 'عرض صفحة الدعوة' : 'Open Invite Page'}
+                          >
+                            <Eye className="h-4 w-4" />
+                          </Button>
                         </div>
-                        <p className="text-xs text-gray-500 mt-2">
+                        <InviteHero
+                          language={language}
+                          teacherFullName={user.displayName || (language === 'ar' ? 'المدرس' : 'Teacher')}
+                          teacherPhotoURL={user.photoURL || undefined}
+                          teacherId={user.uid}
+                          isAuthenticated={false}
+                          onSignOutClick={() => {}}
+                          heroTitleAr={heroTitleAr}
+                          heroTitleEn={heroTitleEn}
+                          heroDescAr={heroDescAr}
+                          heroDescEn={heroDescEn}
+                          editable
+                          onTitleChange={(text) => {
+                            if (language === 'ar') setHeroTitleAr(text); else setHeroTitleEn(text);
+                          }}
+                          onDescChange={(text) => {
+                            if (language === 'ar') setHeroDescAr(text); else setHeroDescEn(text);
+                          }}
+                          heroAvatarBase64={heroAvatarBase64}
+                          frameStyle={heroFrameStyle}
+                          onAvatarUpload={(b64) => setHeroAvatarBase64(b64)}
+                          onFrameStyleChange={(style) => setHeroFrameStyle(style)}
+                          heroTheme={heroTheme}
+                          onThemeChange={(theme) => setHeroTheme(theme)}
+                          overlayTexts={overlayTexts}
+                          onOverlayTextsChange={setOverlayTexts}
+                        />
+                        <p className="text-xs text-gray-500 mt-2 px-6 py-2">
                           {language === 'ar'
-                            ? 'المعاينة تعكس التغييرات فوراً. اضغط "حفظ" لتطبيق التغييرات على صفحة الدعوة.'
-                            : 'Preview reflects changes instantly. Click "Save" to apply changes to the invite page.'}
+                            ? 'اضغط على عنوان ووصف العنوان الرئيسي للتعديل مباشرة. استخدم زر "حفظ التعديلات" بالأعلى لتطبيقها على صفحة الدعوة.'
+                            : 'Click the hero title and description to edit inline. Use the "Save Changes" button above to apply to the invite page.'}
                         </p>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  {/* How Manara Section Editor */}
+                  <Card className="bg-white border-0 shadow-sm">
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <Settings className="h-5 w-5 text-[#2c4656]" />
+                        {language === 'ar' ? 'تخصيص قسم إزاي منارة' : 'Customize "How Manara" Section'}
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-6">
+                      {/* Editable Live Preview */}
+                      <div className="border rounded-lg overflow-hidden border-gray-200">
+                        {/* Action buttons inside the editable box */}
+                        <div className="flex justify-end gap-2 p-2 bg-white/60">
+                          <Button
+                            disabled={isSavingInviteFeatures}
+                            className="bg-[#2c4656] hover:bg-[#1e3240]"
+                            onClick={saveInviteFeatures}
+                          >
+                            {isSavingInviteFeatures
+                              ? (language === 'ar' ? 'جاري الحفظ...' : 'Saving...')
+                              : (language === 'ar' ? 'حفظ التعديلات' : 'Save Changes')}
+                          </Button>
+                          <Button
+                            variant="outline"
+                            onClick={openInvitePage}
+                            aria-label={language === 'ar' ? 'عرض صفحة الدعوة' : 'Open Invite Page'}
+                          >
+                            <Eye className="h-4 w-4" />
+                          </Button>
+                        </div>
+                        <div className="p-6">
+                          <div className="text-center">
+                            <textarea
+                              aria-label={language === 'ar' ? 'عنوان قسم إزاي منارة' : 'How Manara section title'}
+                              dir={language === 'ar' ? 'rtl' : 'ltr'}
+                              lang={language}
+                              spellCheck={false}
+                              value={language === 'ar' ? featuresTitleAr : featuresTitleEn}
+                              onChange={(e) => {
+                                const text = e.target.value;
+                                if (language === 'ar') setFeaturesTitleAr(text); else setFeaturesTitleEn(text);
+                              }}
+                              onInput={(e) => {
+                                const ta = e.currentTarget as HTMLTextAreaElement;
+                                ta.style.height = 'auto';
+                                ta.style.height = `${ta.scrollHeight}px`;
+                              }}
+                              className="text-2xl font-bold mb-2 text-gray-900 w-full bg-transparent border border-transparent focus:border-transparent outline-none resize-none overflow-hidden"
+                              style={{ textAlign: (language === 'ar' ? 'right' : 'left') as any, lineHeight: '1.2', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}
+                              rows={1}
+                            />
+                            <div className="w-24 h-1 bg-blue-500 mx-auto mb-6 rounded"></div>
+                          </div>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+                            {inviteFeatures.map((f, i) => (
+                              <div key={i} className="bg-white rounded-xl shadow-sm overflow-hidden border border-gray-100 p-4 text-center">
+                                <div
+                                  className="text-4xl mb-2 cursor-text select-text"
+                                  contentEditable
+                                  suppressContentEditableWarning
+                                  onInput={(e) => {
+                                    const text = (e.currentTarget.textContent || '').trim();
+                                    const updated = [...inviteFeatures];
+                                    updated[i] = { ...updated[i], emoji: text };
+                                    setInviteFeatures(updated);
+                                  }}
+                                >
+                                  {f.emoji}
+                                </div>
+                                <textarea
+                                  aria-label={language === 'ar' ? 'عنوان العنصر' : 'Feature title'}
+                                  dir={language === 'ar' ? 'rtl' : 'ltr'}
+                                  lang={language}
+                                  spellCheck={false}
+                                  value={language === 'ar' ? f.titleAr : f.titleEn}
+                                  onChange={(e) => {
+                                    const text = e.target.value;
+                                    const updated = [...inviteFeatures];
+                                    updated[i] = {
+                                      ...updated[i],
+                                      ...(language === 'ar' ? { titleAr: text } : { titleEn: text })
+                                    };
+                                    setInviteFeatures(updated);
+                                  }}
+                                  onInput={(e) => {
+                                    const ta = e.currentTarget as HTMLTextAreaElement;
+                                    ta.style.height = 'auto';
+                                    ta.style.height = `${ta.scrollHeight}px`;
+                                  }}
+                                  className="font-semibold text-gray-900 mb-1 w-full bg-transparent border border-transparent focus:border-transparent outline-none resize-none overflow-hidden"
+                                  style={{ textAlign: (language === 'ar' ? 'right' : 'left') as any, lineHeight: '1.2', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}
+                                  rows={1}
+                                />
+                                <textarea
+                                  aria-label={language === 'ar' ? 'وصف العنصر' : 'Feature description'}
+                                  dir={language === 'ar' ? 'rtl' : 'ltr'}
+                                  lang={language}
+                                  spellCheck={false}
+                                  value={language === 'ar' ? f.descAr : f.descEn}
+                                  onChange={(e) => {
+                                    const text = e.target.value;
+                                    const updated = [...inviteFeatures];
+                                    updated[i] = {
+                                      ...updated[i],
+                                      ...(language === 'ar' ? { descAr: text } : { descEn: text })
+                                    };
+                                    setInviteFeatures(updated);
+                                  }}
+                                  onInput={(e) => {
+                                    const ta = e.currentTarget as HTMLTextAreaElement;
+                                    ta.style.height = 'auto';
+                                    ta.style.height = `${ta.scrollHeight}px`;
+                                  }}
+                                  className="text-sm text-gray-600 w-full bg-transparent border border-transparent focus:border-transparent outline-none resize-none overflow-hidden"
+                                  style={{ textAlign: (language === 'ar' ? 'right' : 'left') as any, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}
+                                  rows={2}
+                                />
+                              </div>
+                            ))}
+                          </div>
+                          <p className="text-xs text-gray-500 mt-4 text-center">
+                            {language === 'ar'
+                              ? 'اضغط على أي نص داخل المعاينة للتعديل مباشرة. استخدم زر "حفظ التعديلات" بالأعلى لتطبيقها على صفحة الدعوة.'
+                              : 'Click any text in the preview to edit inline. Use the "Save Changes" button above to apply to the invite page.'}
+                          </p>
+                        </div>
                       </div>
                     </CardContent>
                   </Card>

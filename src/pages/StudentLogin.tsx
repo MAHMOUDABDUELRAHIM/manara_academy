@@ -35,6 +35,9 @@ const StudentLogin = () => {
   // WhatsApp settings
   const [whatsappNumber, setWhatsappNumber] = useState<string>('');
   const [showWhatsappFloat, setShowWhatsappFloat] = useState<boolean>(false);
+  // Teacher branding (platform logo/name)
+  const [brandLogo, setBrandLogo] = useState<string>('');
+  const [platformName, setPlatformName] = useState<string>('');
 
   // استخراج معرف المعلم من الرابط
   useEffect(() => {
@@ -63,6 +66,13 @@ const StudentLogin = () => {
       const teacher = await TeacherService.getTeacherByUid(teacherIdParam);
       if (teacher) {
         setTeacherInfo(teacher);
+        // Branding defaults from public teacher profile (set before reading teacherSettings)
+        if (typeof (teacher as any).platformName === 'string' && (teacher as any).platformName?.trim()) {
+          setPlatformName((teacher as any).platformName);
+        } else {
+          setPlatformName(language === 'ar' ? `منصة ${teacher.fullName}` : `${teacher.fullName}'s Platform`);
+        }
+        setBrandLogo(typeof (teacher as any).brandLogoBase64 === 'string' ? (teacher as any).brandLogoBase64 : '');
         // WhatsApp from public teacher profile (mirrored)
         if (typeof teacher.whatsappNumber === 'string' && teacher.whatsappNumber.trim()) {
           setWhatsappNumber(teacher.whatsappNumber);
@@ -85,6 +95,13 @@ const StudentLogin = () => {
             }
             if (typeof sd?.showWhatsappFloat === 'boolean') {
               setShowWhatsappFloat(sd.showWhatsappFloat);
+            }
+            // Branding overrides from teacherSettings (if available)
+            if (typeof sd?.platformName === 'string' && sd.platformName.trim()) {
+              setPlatformName(sd.platformName);
+            }
+            if (typeof sd?.platformLogoBase64 === 'string' && sd.platformLogoBase64) {
+              setBrandLogo(sd.platformLogoBase64);
             }
           }
         } catch (e) {
@@ -256,13 +273,19 @@ const StudentLogin = () => {
     <>
     <div dir={language === 'ar' ? 'rtl' : 'ltr'} className={`min-h-screen flex items-center justify-center p-4 ${dashboardTheme === 'proA' ? 'bg-gradient-to-br from-blue-50 to-indigo-100' : 'bg-gradient-to-br from-emerald-50 to-green-100'}`}>
       <div className="w-full max-w-md">
-        {/* Teacher Branding Section */}
+        {/* Teacher Branding Section (Platform Logo) */}
         {teacherInfo && (
           <div className="text-center mb-6">
             <div className="inline-flex items-center justify-center w-20 h-20 bg-white rounded-full shadow-lg mb-4" style={{ boxShadow: `0 0 0 6px ${themeAccent}20` }}>
-              {teacherInfo.photoURL ? (
-                <img 
-                  src={teacherInfo.photoURL} 
+              {brandLogo ? (
+                <img
+                  src={brandLogo}
+                  alt={platformName || (language === 'ar' ? 'شعار المنصة' : 'Platform Logo')}
+                  className="w-16 h-16 rounded-full object-cover"
+                />
+              ) : teacherInfo.photoURL ? (
+                <img
+                  src={teacherInfo.photoURL}
                   alt={teacherInfo.fullName}
                   className="w-16 h-16 rounded-full object-cover"
                 />
@@ -274,12 +297,6 @@ const StudentLogin = () => {
                 </div>
               )}
             </div>
-            <h1 className="text-2xl font-bold text-gray-900 mb-2">
-              {language === 'ar' ? `فصل ${teacherInfo.fullName}` : `${teacherInfo.fullName}'s Class`}
-            </h1>
-            <p className="text-gray-600">
-              {language === 'ar' ? 'سجل دخولك للوصول إلى المحتوى التعليمي' : 'Sign in to access your learning content'}
-            </p>
           </div>
         )}
         
@@ -289,16 +306,9 @@ const StudentLogin = () => {
               {language === 'ar' ? 'تسجيل دخول الطلاب' : 'Student Login'}
             </CardTitle>
             <CardDescription className="text-center">
-              {teacherInfo ? (
-                <div className="space-y-2">
-                  <p>{language === 'ar' ? 'مرحباً بك في فصل' : 'Welcome to'}</p>
-                  <p className="font-semibold" style={{ color: themeAccent }}>{teacherInfo.fullName}</p>
-                </div>
-              ) : (
-                language === 'ar' 
-                  ? 'أدخل بياناتك للوصول إلى حسابك' 
-                  : 'Enter your credentials to access your account'
-              )}
+              {language === 'ar' 
+                ? 'أدخل بياناتك للوصول إلى حسابك' 
+                : 'Enter your credentials to access your account'}
             </CardDescription>
           </CardHeader>
           

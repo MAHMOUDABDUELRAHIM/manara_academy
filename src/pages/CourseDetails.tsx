@@ -3,7 +3,8 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuthContext } from '@/contexts/AuthContext';
 import DashboardHeader from '@/components/DashboardHeader';
-import FloatingSupportChat from '@/components/FloatingSupportChat';
+import { db } from '@/firebase/config';
+import { doc, getDoc } from 'firebase/firestore';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -26,7 +27,7 @@ import {
   Download,
   Loader2
 } from 'lucide-react';
-import { Upload } from 'lucide-react';
+import { Upload, MessageCircle } from 'lucide-react';
 // تم الاستغناء عن Firebase Storage وحفظ الصورة كـ Base64 في Firestore
 import { toast } from 'sonner';
 import InviteHeader from '@/components/InviteHeader';
@@ -61,6 +62,16 @@ const CourseDetails = () => {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
   const [showNotificationsPanel, setShowNotificationsPanel] = useState(false);
+  // WhatsApp floating button settings
+  const [whatsappNumber, setWhatsappNumber] = useState<string>('');
+  const [showWhatsappFloat, setShowWhatsappFloat] = useState<boolean>(false);
+  const normalizedWhatsapp = (whatsappNumber || '').replace(/[^+\d]/g, '');
+  const shouldShowWhatsapp = !!showWhatsappFloat && !!normalizedWhatsapp;
+  // Branding for header (logo + name + scales)
+  const [brandLogo, setBrandLogo] = useState<string>('');
+  const [brandName, setBrandName] = useState<string>('');
+  const [brandLogoScale, setBrandLogoScale] = useState<number>(1);
+  const [brandNameScale, setBrandNameScale] = useState<number>(1);
 
   // تحويل صورة إلى Base64 مع ضغط بسيط لتقليل الحجم
   const compressImageToBase64 = (file: File, maxWidth = 1280, quality = 0.75): Promise<string> => {
@@ -108,6 +119,68 @@ const CourseDetails = () => {
         }
         
         setCourse(courseData);
+
+        // Load WhatsApp + branding settings for the instructor or linked teacher
+        try {
+          let teacherIdForPage: string | undefined = courseData.instructorId;
+          if (user?.uid) {
+            try {
+              const linked = await TeacherService.getTeacherForStudent(user.uid);
+              if (linked?.id) teacherIdForPage = linked.id;
+            } catch (e) {
+              // ignore and fall back to instructorId
+            }
+          }
+          if (teacherIdForPage) {
+            try {
+              const teacherData = await TeacherService.getTeacherProfile(teacherIdForPage);
+              if (teacherData) {
+                const tWhats = (teacherData as any)?.whatsappNumber as string | undefined;
+                const tShow = (teacherData as any)?.showWhatsappFloat as boolean | undefined;
+                if (typeof tWhats === 'string' && tWhats.trim()) setWhatsappNumber(tWhats);
+                if (typeof tShow === 'boolean') setShowWhatsappFloat(!!tShow);
+
+                // Branding from public teacher profile (mirrored fields)
+                const tLogo = (teacherData as any)?.brandLogoBase64 as string | undefined;
+                const tName = (teacherData as any)?.platformName as string | undefined;
+                const tLogoScale = (teacherData as any)?.brandLogoScale as number | undefined;
+                const tNameScale = (teacherData as any)?.brandNameScale as number | undefined;
+                if (tLogo) setBrandLogo(tLogo);
+                if (tName) setBrandName(tName);
+                if (typeof tLogoScale === 'number') setBrandLogoScale(Math.min(3, Math.max(0.6, tLogoScale)));
+                if (typeof tNameScale === 'number') setBrandNameScale(Math.min(3, Math.max(0.6, tNameScale)));
+              }
+            } catch (e) {
+              console.warn('Failed to load public teacher profile (details page)', e);
+            }
+            try {
+              const settingsSnap = await getDoc(doc(db, 'teacherSettings', teacherIdForPage));
+              if (settingsSnap.exists()) {
+                const data = settingsSnap.data() as any;
+                if (typeof data?.whatsappNumber === 'string' && data.whatsappNumber.trim()) {
+                  setWhatsappNumber(data.whatsappNumber);
+                }
+                if (typeof data?.showWhatsappFloat === 'boolean') {
+                  setShowWhatsappFloat(!!data.showWhatsappFloat);
+                }
+
+                // Branding from teacherSettings (fallbacks and scales)
+                const sLogo = data?.platformLogoBase64 as string | undefined;
+                const sName = data?.platformName as string | undefined;
+                const sLogoScale = data?.brandLogoScale as number | undefined;
+                const sNameScale = data?.brandNameScale as number | undefined;
+                if (!brandLogo && sLogo) setBrandLogo(sLogo);
+                if (!brandName && sName) setBrandName(sName);
+                if (typeof sLogoScale === 'number') setBrandLogoScale(Math.min(3, Math.max(0.6, sLogoScale)));
+                if (typeof sNameScale === 'number') setBrandNameScale(Math.min(3, Math.max(0.6, sNameScale)));
+              }
+            } catch (e) {
+              console.warn('Failed to load teacherSettings (details page)', e);
+            }
+          }
+        } catch (e) {
+          console.warn('Failed to resolve WhatsApp settings (details page)', e);
+        }
       } catch (err) {
         console.error('Error fetching course:', err);
         setError(language === 'ar' ? 'خطأ في تحميل بيانات الدورة' : 'Error loading course data');
@@ -295,6 +368,10 @@ const CourseDetails = () => {
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-gray-950 dark:to-gray-900 flex flex-col" dir={language === 'ar' ? 'rtl' : 'ltr'}>
       <InviteHeader 
         teacherName={course?.instructorName}
+        brandLogo={brandLogo}
+        brandName={brandName}
+        brandLogoScale={brandLogoScale}
+        brandNameScale={brandNameScale}
         unreadCount={unreadNotifications}
         onNotificationsClick={async () => {
           try {
@@ -626,8 +703,17 @@ const CourseDetails = () => {
           © Manara Academy 2025 - جميع الحقوق محفوظة
         </div>
       </footer>
-      
-      <FloatingSupportChat />
+      {shouldShowWhatsapp && (
+        <a
+          href={`https://wa.me/${normalizedWhatsapp}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="fixed bottom-6 right-6 z-50 inline-flex items-center justify-center w-14 h-14 rounded-full bg-green-500 hover:bg-green-600 shadow-lg text-white"
+          aria-label={language === 'ar' ? 'تواصل عبر واتساب' : 'Contact via WhatsApp'}
+        >
+          <MessageCircle className="w-7 h-7" />
+        </a>
+      )}
     </div>
   );
 };

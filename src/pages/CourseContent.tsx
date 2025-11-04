@@ -4,7 +4,8 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuthContext } from '@/contexts/AuthContext';
 import InviteHeader from '@/components/InviteHeader';
-import FloatingSupportChat from '@/components/FloatingSupportChat';
+import { db } from '@/firebase/config';
+import { doc, getDoc } from 'firebase/firestore';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
@@ -28,6 +29,7 @@ import {
   Award
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { MessageCircle } from 'lucide-react';
 
 const CourseContent = () => {
   // إعدادات Bunny المأخوذة من متغيرات البيئة
@@ -56,9 +58,20 @@ const CourseContent = () => {
   const [examAttempts, setExamAttempts] = useState<Record<string, { startAt?: Date; submittedAt?: Date }>>({});
   const [assignmentResults, setAssignmentResults] = useState<Record<string, any>>({});
   const [showingResultsForAssignment, setShowingResultsForAssignment] = useState<string | null>(null);
+  // WhatsApp floating button settings
+  const [whatsappNumber, setWhatsappNumber] = useState<string>('');
+  const [showWhatsappFloat, setShowWhatsappFloat] = useState<boolean>(false);
+  // Branding settings for header (logo and platform name)
+  const [brandLogo, setBrandLogo] = useState<string | null>(null);
+  const [brandName, setBrandName] = useState<string | null>(null);
+  const [brandLogoScale, setBrandLogoScale] = useState<number>(1);
+  const [brandNameScale, setBrandNameScale] = useState<number>(1);
   const playerRef = useRef<HTMLDivElement | null>(null);
   const videoElRef = useRef<HTMLIFrameElement | HTMLVideoElement | null>(null);
   // إعدادات Bunny مُعرَّفة بالفعل أعلى المكوّن
+
+  const normalizedWhatsapp = (whatsappNumber || '').replace(/[^+\d]/g, '');
+  const shouldShowWhatsapp = !!showWhatsappFloat && !!normalizedWhatsapp;
 
   // ساعة العد التنازلي لفتح الامتحانات
   const [nowMs, setNowMs] = useState<number>(Date.now());
@@ -152,9 +165,10 @@ const CourseContent = () => {
           throw new Error(language === 'ar' ? 'لم يتم العثور على الدورة' : 'Course not found');
         }
         // Guard: allow الوصول فقط لدورات المدرس المرتبط بالطالب
+        let linkedTeacher: any | null = null;
         if (user?.uid) {
           try {
-            const linkedTeacher = await TeacherService.getTeacherForStudent(user.uid);
+            linkedTeacher = await TeacherService.getTeacherForStudent(user.uid);
             if (linkedTeacher && courseData.instructorId !== linkedTeacher.id) {
               throw new Error(language === 'ar' ? 'لا يمكنك الوصول لهذه الدورة لأنها من مدرس آخر' : 'You cannot access this course; it belongs to another teacher');
             }
@@ -198,6 +212,80 @@ const CourseContent = () => {
           }
         } else {
           setProgressPercentage(0);
+        }
+
+        // Load WhatsApp settings from teacher profile and settings
+        try {
+          const teacherIdForPage = (linkedTeacher?.id) || courseData.instructorId;
+          if (teacherIdForPage) {
+            try {
+              const teacherData = await TeacherService.getTeacherProfile(teacherIdForPage);
+              if (teacherData) {
+                const tWhats = (teacherData as any)?.whatsappNumber as string | undefined;
+                const tShow = (teacherData as any)?.showWhatsappFloat as boolean | undefined;
+                if (typeof tWhats === 'string' && tWhats.trim()) setWhatsappNumber(tWhats);
+                if (typeof tShow === 'boolean') setShowWhatsappFloat(!!tShow);
+              }
+            } catch (e) {
+              console.warn('Failed to load public teacher profile for course page', e);
+            }
+            try {
+              const settingsSnap = await getDoc(doc(db, 'teacherSettings', teacherIdForPage));
+              if (settingsSnap.exists()) {
+                const data = settingsSnap.data() as any;
+                if (typeof data?.whatsappNumber === 'string' && data.whatsappNumber.trim()) {
+                  setWhatsappNumber(data.whatsappNumber);
+                }
+                if (typeof data?.showWhatsappFloat === 'boolean') {
+                  setShowWhatsappFloat(!!data.showWhatsappFloat);
+                }
+              }
+            } catch (e) {
+              console.warn('Failed to load teacherSettings for course page', e);
+            }
+          }
+        } catch (e) {
+          console.warn('Failed to resolve WhatsApp settings for course page', e);
+        }
+
+        // Load branding settings (logo and platform name) from teacher profile and settings
+        try {
+          const teacherIdForPage = (linkedTeacher?.id) || courseData.instructorId;
+          if (teacherIdForPage) {
+            try {
+              const teacherData = await TeacherService.getTeacherProfile(teacherIdForPage);
+              if (teacherData) {
+                const brandLogoBase64 = (teacherData as any)?.brandLogoBase64 ?? (teacherData as any)?.platformLogoBase64;
+                const platformName = (teacherData as any)?.platformName;
+                const logoScaleRaw = (teacherData as any)?.brandLogoScale;
+                const nameScaleRaw = (teacherData as any)?.brandNameScale;
+                if (typeof brandLogoBase64 === 'string' && brandLogoBase64.trim()) setBrandLogo(brandLogoBase64);
+                if (typeof platformName === 'string' && platformName.trim()) setBrandName(platformName);
+                if (typeof logoScaleRaw === 'number') setBrandLogoScale(logoScaleRaw);
+                if (typeof nameScaleRaw === 'number') setBrandNameScale(nameScaleRaw);
+              }
+            } catch (e) {
+              console.warn('Failed to load public branding for course page', e);
+            }
+            try {
+              const settingsSnap = await getDoc(doc(db, 'teacherSettings', teacherIdForPage));
+              if (settingsSnap.exists()) {
+                const data = settingsSnap.data() as any;
+                const sBrandLogo = data?.platformLogoBase64 ?? data?.brandLogoBase64;
+                const sPlatformName = data?.platformName;
+                const sLogoScale = data?.brandLogoScale;
+                const sNameScale = data?.brandNameScale;
+                if (typeof sBrandLogo === 'string' && sBrandLogo.trim()) setBrandLogo(sBrandLogo);
+                if (typeof sPlatformName === 'string' && sPlatformName.trim()) setBrandName(sPlatformName);
+                if (typeof sLogoScale === 'number') setBrandLogoScale(sLogoScale);
+                if (typeof sNameScale === 'number') setBrandNameScale(sNameScale);
+              }
+            } catch (e) {
+              console.warn('Failed to load teacherSettings branding for course page', e);
+            }
+          }
+        } catch (e) {
+          console.warn('Failed to resolve branding for course page', e);
         }
       } catch (err: any) {
         console.error(err);
@@ -930,7 +1018,12 @@ if (hasEnded || hasResult) {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-gray-950 dark:to-gray-900 flex flex-col" dir={language === 'ar' ? 'rtl' : 'ltr'}>
-      <InviteHeader />
+      <InviteHeader 
+        brandLogo={brandLogo ?? undefined}
+        brandName={brandName ?? undefined}
+        brandLogoScale={brandLogoScale}
+        brandNameScale={brandNameScale}
+      />
       
       <main className="p-6 overflow-auto">
           {/* Back Button */}
@@ -1099,7 +1192,17 @@ if (hasEnded || hasResult) {
 
         </main>
       
-      <FloatingSupportChat />
+      {shouldShowWhatsapp && (
+        <a
+          href={`https://wa.me/${normalizedWhatsapp}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="fixed bottom-6 right-6 z-50 inline-flex items-center justify-center w-14 h-14 rounded-full bg-green-500 hover:bg-green-600 shadow-lg text-white"
+          aria-label={language === 'ar' ? 'تواصل عبر واتساب' : 'Contact via WhatsApp'}
+        >
+          <MessageCircle className="w-7 h-7" />
+        </a>
+      )}
     </div>
   );
 };

@@ -37,6 +37,7 @@ import { toast } from 'sonner';
 import { StudentDashboardPreview } from '@/components/StudentDashboardPreview';
 import InviteHeader from '@/components/InviteHeader';
 import { InviteHero } from '@/components/InviteHero';
+import { TeacherService } from '@/services/teacherService';
 
 
 interface Student {
@@ -78,6 +79,44 @@ export default function InviteStudents() {
   const [isUploadingLogo, setIsUploadingLogo] = useState(false);
   const [isSavingBrand, setIsSavingBrand] = useState(false);
   const logoInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Assistant permissions: detect if current user is an assistant (proxy account)
+  const [isAssistant, setIsAssistant] = useState(false);
+  useEffect(() => {
+    const checkAssistant = async () => {
+      try {
+        if (!user?.uid) return;
+        const meDoc = await getDoc(doc(db, 'teachers', user.uid));
+        if (meDoc.exists()) {
+          const data = meDoc.data() as any;
+          if (typeof data?.proxyOf === 'string' && data.proxyOf.length > 0) {
+            setIsAssistant(true);
+          } else {
+            setIsAssistant(false);
+          }
+        }
+      } catch (e) {
+        console.warn('Failed to check assistant proxyOf flag', e);
+      }
+    };
+    checkAssistant();
+  }, [user?.uid]);
+
+  // Resolve effective teacher ID (supports assistant accounts via proxyOf)
+  const [effectiveTeacherId, setEffectiveTeacherId] = useState<string | null>(null);
+  useEffect(() => {
+    const resolveEffectiveTeacher = async () => {
+      if (!user?.uid) return;
+      try {
+        const profile = await TeacherService.getTeacherByUid(user.uid);
+        const effId = (profile as any)?.id || user.uid;
+        setEffectiveTeacherId(effId);
+      } catch (e) {
+        setEffectiveTeacherId(user.uid);
+      }
+    };
+    resolveEffectiveTeacher();
+  }, [user?.uid]);
 
   // Hero settings state
   const [heroTitleAr, setHeroTitleAr] = useState('');
@@ -303,6 +342,16 @@ export default function InviteStudents() {
     return () => unsubscribe();
   }, [user]);
 
+  // Once effectiveTeacherId is resolved, load dependent data
+  useEffect(() => {
+    if (!effectiveTeacherId) return;
+    loadInvitationCode();
+    loadBrandSettings();
+    loadSocialMediaSettings();
+    loadInviteFeatures();
+    loadStudents();
+  }, [effectiveTeacherId]);
+
   // Generate unique 6-character invitation code
   const generateUniqueCode = async () => {
     const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -333,10 +382,10 @@ export default function InviteStudents() {
   };
 
   const loadInvitationCode = async () => {
-    if (!user) return;
+    if (!effectiveTeacherId) return;
     
     try {
-      const userDocRef = doc(db, 'teachers', user.uid);
+      const userDocRef = doc(db, 'teachers', effectiveTeacherId);
       const userDoc = await getDoc(userDocRef);
       
       if (userDoc.exists()) {
@@ -352,7 +401,7 @@ export default function InviteStudents() {
           await updateDoc(userDocRef, { invitationCode: newCode });
           await setDoc(doc(db, 'invitationCodes', newCode), {
             code: newCode,
-            teacherId: user.uid,
+            teacherId: effectiveTeacherId,
             teacherName: user.displayName || user.email,
             createdAt: new Date()
           });
@@ -385,12 +434,12 @@ export default function InviteStudents() {
 
   // New: save theme selection to Firestore
   const saveTheme = async (theme: 'proA' | 'proB') => {
-    if (!user) return;
+    if (!effectiveTeacherId) return;
     try {
       setIsSavingTheme(true);
       setSelectedTheme(theme);
       await setDoc(
-        doc(db, 'teacherSettings', user.uid),
+        doc(db, 'teacherSettings', effectiveTeacherId),
         {
           studentDashboardTheme: theme,
           updatedAt: new Date()
@@ -413,9 +462,9 @@ export default function InviteStudents() {
   const clampScale = (v: number) => Math.min(3, Math.max(0.6, Number.isFinite(v) ? v : 1));
 
   const loadBrandSettings = async () => {
-    if (!user) return;
+    if (!effectiveTeacherId) return;
     try {
-      const settingsDoc = await getDoc(doc(db, 'teacherSettings', user.uid));
+      const settingsDoc = await getDoc(doc(db, 'teacherSettings', effectiveTeacherId));
       if (settingsDoc.exists()) {
         const data = settingsDoc.data();
         setPlatformName(
@@ -495,7 +544,11 @@ export default function InviteStudents() {
 
   // Upload logo: compress and store Base64 directly in Firestore
   const handleLogoUpload = async (file: File) => {
-    if (!user || !file) return;
+    if (!effectiveTeacherId || !file) return;
+    if (isAssistant) {
+      toast.error(language === 'ar' ? 'حساب مساعد غير مسموح بتعديل الشعار' : 'Assistant account cannot modify logo');
+      return;
+    }
     try {
       setIsUploadingLogo(true);
       // Basic validation
@@ -509,13 +562,13 @@ export default function InviteStudents() {
       const dataUrl = await blobToDataURL(blob);
       setPlatformLogoBase64(dataUrl);
       await setDoc(
-        doc(db, 'teacherSettings', user.uid),
+        doc(db, 'teacherSettings', effectiveTeacherId),
         { platformLogoBase64: dataUrl, updatedAt: new Date() },
         { merge: true }
       );
       // Mirror logo to public teacher profile for student access
       try {
-        await updateDoc(doc(db, 'teachers', user.uid), { brandLogoBase64: dataUrl, updatedAt: new Date().toISOString() });
+        await updateDoc(doc(db, 'teachers', effectiveTeacherId), { brandLogoBase64: dataUrl, updatedAt: new Date().toISOString() });
       } catch (e) {
         console.warn('Failed to mirror brand logo to teacher profile', e);
       }
@@ -530,18 +583,22 @@ export default function InviteStudents() {
 
   // Save platform name to Firestore
   const saveBrandSettings = async () => {
-    if (!user) return;
+    if (!effectiveTeacherId) return;
+    if (isAssistant) {
+      toast.error(language === 'ar' ? 'حساب مساعد غير مسموح بتعديل الإعدادات' : 'Assistant account cannot modify settings');
+      return;
+    }
     try {
       setIsSavingBrand(true);
       await setDoc(
-        doc(db, 'teacherSettings', user.uid),
+        doc(db, 'teacherSettings', effectiveTeacherId),
         { platformName, platformLogoBase64, brandLogoScale, brandNameScale, updatedAt: new Date() },
         { merge: true }
       );
       // Mirror name/logo to teacher profile for public consumption
       try {
         await updateDoc(
-          doc(db, 'teachers', user.uid),
+          doc(db, 'teachers', effectiveTeacherId),
           {
             brandLogoBase64: platformLogoBase64 || '',
             platformName: platformName || '',
@@ -591,9 +648,9 @@ export default function InviteStudents() {
 
   // Load social media settings from Firestore
   const loadSocialMediaSettings = async () => {
-    if (!user) return;
+    if (!effectiveTeacherId) return;
     try {
-      const settingsDoc = await getDoc(doc(db, 'teacherSettings', user.uid));
+      const settingsDoc = await getDoc(doc(db, 'teacherSettings', effectiveTeacherId));
       if (settingsDoc.exists()) {
         const data = settingsDoc.data();
         if (data.socialMedia) {
@@ -613,11 +670,15 @@ export default function InviteStudents() {
 
   // Save social media settings to Firestore
   const saveSocialMediaSettings = async () => {
-    if (!user) return;
+    if (!effectiveTeacherId) return;
+    if (isAssistant) {
+      toast.error(language === 'ar' ? 'حساب مساعد غير مسموح بتعديل الإعدادات' : 'Assistant account cannot modify settings');
+      return;
+    }
     try {
       setIsSavingSocial(true);
       await setDoc(
-        doc(db, 'teacherSettings', user.uid),
+        doc(db, 'teacherSettings', effectiveTeacherId),
         {
           socialMedia,
           updatedAt: new Date(),
@@ -627,7 +688,7 @@ export default function InviteStudents() {
       // Mirror social media to public teacher profile for invite page consumption
       try {
         await updateDoc(
-          doc(db, 'teachers', user.uid),
+          doc(db, 'teachers', effectiveTeacherId),
           {
             socialMedia: socialMedia || {},
             updatedAt: new Date().toISOString()
@@ -647,11 +708,15 @@ export default function InviteStudents() {
 
   // Save WhatsApp settings to Firestore
   const saveWhatsAppSettings = async () => {
-    if (!user) return;
+    if (!effectiveTeacherId) return;
+    if (isAssistant) {
+      toast.error(language === 'ar' ? 'حساب مساعد غير مسموح بتعديل الإعدادات' : 'Assistant account cannot modify settings');
+      return;
+    }
     try {
       setIsSavingSocial(true);
       await setDoc(
-        doc(db, 'teacherSettings', user.uid),
+        doc(db, 'teacherSettings', effectiveTeacherId),
         {
           whatsappNumber,
           showWhatsappFloat,
@@ -662,7 +727,7 @@ export default function InviteStudents() {
       // Mirror WhatsApp settings to public teacher profile for invite page consumption
       try {
         await updateDoc(
-          doc(db, 'teachers', user.uid),
+          doc(db, 'teachers', effectiveTeacherId),
           {
             whatsappNumber: whatsappNumber || '',
             showWhatsappFloat: !!showWhatsappFloat,
@@ -691,12 +756,12 @@ export default function InviteStudents() {
       return;
     }
     
-    console.log('🔑 معرف المعلم:', user.uid);
+    console.log('🔑 معرف المعلم الفعّال:', effectiveTeacherId || user.uid);
     
     try {
       const studentsQuery = query(
         collection(db, 'students'),
-        where('teacherId', '==', user.uid)
+        where('teacherId', '==', effectiveTeacherId || user.uid)
       );
       
       console.log('📊 تنفيذ استعلام الطلاب...');
@@ -756,11 +821,15 @@ export default function InviteStudents() {
 
   // Save hero settings to Firestore
   const saveHeroSettings = async () => {
-    if (!user) return;
+    if (!effectiveTeacherId) return;
+    if (isAssistant) {
+      toast.error(language === 'ar' ? 'حساب مساعد غير مسموح بتعديل الإعدادات' : 'Assistant account cannot modify settings');
+      return;
+    }
     try {
       setIsSavingHero(true);
       await setDoc(
-        doc(db, 'teacherSettings', user.uid),
+        doc(db, 'teacherSettings', effectiveTeacherId),
         {
           inviteHero: {
             heroTitleAr,
@@ -778,7 +847,7 @@ export default function InviteStudents() {
       );
       // Mirror hero settings to public teacher profile for student-facing invite page consumption
       try {
-        await updateDoc(doc(db, 'teachers', user.uid), {
+        await updateDoc(doc(db, 'teachers', effectiveTeacherId), {
           heroTitleAr: heroTitleAr || '',
           heroTitleEn: heroTitleEn || '',
           heroDescAr: heroDescAr || '',
@@ -814,11 +883,15 @@ export default function InviteStudents() {
 
   // Save "How Manara" features to Firestore
   const saveInviteFeatures = async () => {
-    if (!user) return;
+    if (!effectiveTeacherId) return;
+    if (isAssistant) {
+      toast.error(language === 'ar' ? 'حساب مساعد غير مسموح بتعديل الإعدادات' : 'Assistant account cannot modify settings');
+      return;
+    }
     try {
       setIsSavingInviteFeatures(true);
       await setDoc(
-        doc(db, 'teacherSettings', user.uid),
+        doc(db, 'teacherSettings', effectiveTeacherId),
         {
           inviteFeatures: {
             titleAr: featuresTitleAr,
@@ -832,7 +905,7 @@ export default function InviteStudents() {
       // Mirror How Manara section to public teacher profile for invite page consumption
       try {
         await updateDoc(
-          doc(db, 'teachers', user.uid),
+          doc(db, 'teachers', effectiveTeacherId),
           {
             inviteFeatures: {
               titleAr: featuresTitleAr || '',
@@ -856,17 +929,18 @@ export default function InviteStudents() {
 
   // Open invite page with current teacher UID
   const openInvitePage = () => {
-    if (!user?.uid) {
+    if (!effectiveTeacherId && !user?.uid) {
       toast.error(language === 'ar' ? 'لم يتم التعرف على حساب المدرس' : 'Teacher account not recognized');
       return;
     }
-    const url = `${window.location.origin}/invite/${user.uid}?readonly=1`;
+    const teacherIdForLink = effectiveTeacherId || user.uid;
+    const url = `${window.location.origin}/invite/${teacherIdForLink}?readonly=1`;
     window.open(url, '_blank');
   };
 
   // Save custom invitation code
   const saveCustomCode = async () => {
-    if (!user || !customCode.trim()) return;
+    if (!effectiveTeacherId || !customCode.trim()) return;
     
     // Validate code format (6 characters, alphanumeric)
     const codeRegex = /^[A-Z0-9]{6}$/;
@@ -887,7 +961,7 @@ export default function InviteStudents() {
       
       if (!querySnapshot.empty) {
         const existingDoc = querySnapshot.docs[0];
-        if (existingDoc.data().teacherId !== user.uid) {
+        if (existingDoc.data().teacherId !== effectiveTeacherId) {
           toast.error(language === 'ar' ? 'هذا الرمز مستخدم بالفعل' : 'This code is already taken');
           return;
         }
@@ -900,12 +974,12 @@ export default function InviteStudents() {
       }
       
       // Save new code
-      const userDocRef = doc(db, 'teachers', user.uid);
+      const userDocRef = doc(db, 'teachers', effectiveTeacherId);
       await updateDoc(userDocRef, { invitationCode: upperCode });
       
       await setDoc(doc(db, 'invitationCodes', upperCode), {
         code: upperCode,
-        teacherId: user.uid,
+        teacherId: effectiveTeacherId,
         teacherName: user.displayName || user.email,
         createdAt: new Date()
       });
@@ -1138,7 +1212,7 @@ export default function InviteStudents() {
                             brandLogoScale={brandLogoScale}
                             brandNameScale={brandNameScale}
                             showProfileAvatar={false}
-                            teacherId={user.uid}
+                            teacherId={effectiveTeacherId || user.uid}
                           />
                         </div>
                       </div>

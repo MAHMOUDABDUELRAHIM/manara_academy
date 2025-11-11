@@ -25,13 +25,14 @@ const Login = () => {
       const user = await login(email, password);
       toast.success(language === 'ar' ? 'تم تسجيل الدخول بنجاح' : 'Login successful');
       
-      // Redirect based on user role
+      // Main login is for teachers/admins; students should use student-login via invite
       if (user?.role === 'teacher') {
         navigate('/teacher-dashboard');
       } else if (user?.role === 'admin') {
         navigate('/admin-dashboard');
       } else {
-        navigate('/dashboard');
+        // Redirect students to dedicated student login page
+        navigate('/student-login?redirect=/dashboard');
       }
     } catch (error: any) {
       if (error.message === 'account_suspended') {
@@ -57,11 +58,13 @@ const Login = () => {
       }
       toast.success(language === 'ar' ? 'تم تسجيل الدخول بنجاح' : 'Login successful');
       
-      // Redirect based on user role
+      // Main login social is for teachers; students use student-login
       if (user?.role === 'teacher') {
         navigate('/teacher-dashboard');
+      } else if (user?.role === 'admin') {
+        navigate('/admin-dashboard');
       } else {
-        navigate('/dashboard');
+        navigate('/student-login?redirect=/dashboard');
       }
     } catch (error: any) {
       if (error.message === 'account_suspended') {

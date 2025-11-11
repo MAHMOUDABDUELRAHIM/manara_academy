@@ -15,10 +15,42 @@ service cloud.firestore {
         exists(/databases/$(database)/documents/admins/$(request.auth.uid));
     }
     
+    // ===== قواعد المستخدمين (users) =====
+    match /users/{userId} {
+      // القراءة والكتابة لصاحب الحساب
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+      // القراءة والكتابة للأدمن
+      allow read, write: if request.auth != null &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+    
     // ===== قواعد المدرسين =====
     match /teachers/{teacherId} {
       // السماح للمدرس بقراءة وكتابة بياناته الخاصة
-      allow read, write: if request.auth != null && request.auth.uid == teacherId;
+      allow read, write: if request.auth != null && (
+        request.auth.uid == teacherId ||
+        (
+          // السماح للمساعد المرتبط بالمدرس بالقراءة والكتابة
+          exists(/databases/$(database)/documents/teachers/$(request.auth.uid)) &&
+          get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.proxyOf == teacherId
+        )
+      );
+
+      // السماح للمدرس الرئيسي بإدارة حسابات المساعدين الخاصة به داخل مجموعة المدرسين
+      // يشمل ذلك تحديث صلاحيات المساعد (allowedPages, allowedActions) وحذف حساب المساعد
+      allow update: if request.auth != null &&
+        exists(/databases/$(database)/documents/teachers/$(request.auth.uid)) &&
+        (
+          // تأكيد أن هذا المستند يخص مساعدًا مرتبطًا بالمدرس الحالي
+          (resource.data.keys().hasAny(['proxyOf']) && resource.data.proxyOf == request.auth.uid) ||
+          (request.resource.data.keys().hasAny(['proxyOf']) && request.resource.data.proxyOf == request.auth.uid)
+        ) &&
+        // تقييد التحديث على حقول الصلاحيات فقط مع تحديث التاريخ
+        resource.data.diff(request.resource.data).changedKeys().hasOnly(['allowedPages', 'allowedActions', 'updatedAt']);
+
+      allow delete: if request.auth != null &&
+        exists(/databases/$(database)/documents/teachers/$(request.auth.uid)) &&
+        (resource.data.keys().hasAny(['proxyOf']) && resource.data.proxyOf == request.auth.uid);
       
       // السماح بإنشاء مستند مدرس جديد أثناء التسجيل
       allow create: if request.auth != null && request.auth.uid == teacherId;
@@ -49,7 +81,16 @@ service cloud.firestore {
         exists(/databases/$(database)/documents/teachers/$(request.auth.uid)) &&
         (
           resource.data.teacherId == request.auth.uid ||
-          request.resource.data.teacherId == request.auth.uid
+          request.resource.data.teacherId == request.auth.uid ||
+          (
+            // السماح للمساعد بتحديث حقول الطلاب المرتبطين بالمدرس الرئيسي
+            (
+              get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.proxyOf == resource.data.teacherId ||
+              get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.proxyOf == request.resource.data.teacherId
+            ) &&
+            // تقييد التحديث لصلاحية إدارة الطلاب
+            'manage_students' in get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.allowedActions
+          )
         );
 
       // السماح للمدرسين المرتبطين بقراءة بيانات الطلاب
@@ -68,8 +109,15 @@ service cloud.firestore {
     match /studentTeacherLinks/{linkId} {
       // السماح للطالب والمدرس المرتبطين بقراءة الرابط
       allow read: if request.auth != null && 
-        (resource.data.studentId == request.auth.uid || 
-         resource.data.teacherId == request.auth.uid);
+        (
+          resource.data.studentId == request.auth.uid || 
+          resource.data.teacherId == request.auth.uid ||
+          (
+            // السماح للمساعد المرتبط بالمدرس الرئيسي بقراءة روابط هذا المدرس
+            exists(/databases/$(database)/documents/teachers/$(request.auth.uid)) &&
+            get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.proxyOf == resource.data.teacherId
+          )
+        );
       
       // السماح للطالب بإنشاء رابط جديد
       allow create: if request.auth != null && 
@@ -99,6 +147,11 @@ service cloud.firestore {
           resource.data.isActive == true
         ) ||
         resource.data.instructorId == request.auth.uid ||
+        (
+          // السماح للمساعد المرتبط بالمدرس بقراءة دورات المدرس الرئيسي
+          exists(/databases/$(database)/documents/teachers/$(request.auth.uid)) &&
+          resource.data.instructorId == get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.proxyOf
+        ) ||
         exists(/databases/$(database)/documents/admins/$(request.auth.uid))
       );
 
@@ -112,16 +165,37 @@ service cloud.firestore {
       // - المشرف لديه صلاحية كاملة
       allow create: if request.auth != null && (
         request.resource.data.instructorId == request.auth.uid ||
+        (
+          // السماح للمساعد بإنشاء دورة لصالح المدرس الرئيسي
+          exists(/databases/$(database)/documents/teachers/$(request.auth.uid)) &&
+          request.resource.data.instructorId == get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.proxyOf &&
+          // تقييد الإنشاء بالصلاحية
+          'create_course' in get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.allowedActions
+        ) ||
         exists(/databases/$(database)/documents/admins/$(request.auth.uid))
       );
 
       allow update: if request.auth != null && (
         request.resource.data.instructorId == request.auth.uid ||
+        (
+          // السماح للمساعد بتحديث دورات المدرس الرئيسي
+          exists(/databases/$(database)/documents/teachers/$(request.auth.uid)) &&
+          request.resource.data.instructorId == get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.proxyOf &&
+          // تقييد التحديث بالصلاحية
+          'edit_course' in get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.allowedActions
+        ) ||
         exists(/databases/$(database)/documents/admins/$(request.auth.uid))
       );
 
       allow delete: if request.auth != null && (
         resource.data.instructorId == request.auth.uid ||
+        (
+          // السماح للمساعد بحذف دورات المدرس الرئيسي
+          exists(/databases/$(database)/documents/teachers/$(request.auth.uid)) &&
+          resource.data.instructorId == get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.proxyOf &&
+          // تقييد الحذف بالصلاحية
+          'delete_course' in get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.allowedActions
+        ) ||
         exists(/databases/$(database)/documents/admins/$(request.auth.uid))
       );
     }
@@ -229,16 +303,41 @@ service cloud.firestore {
         exists(/databases/$(database)/documents/admins/$(request.auth.uid));
     }
     
-    // ===== قواعد إعدادات المدرسين =====
-    match /teacherSettings/{teacherId} {
-      // السماح للمدرس بقراءة وكتابة إعداداته الخاصة
-      allow read, write: if request.auth != null && request.auth.uid == teacherId;
-      
-      // السماح بإنشاء مستند إعدادات جديد للمدرس
-      allow create: if request.auth != null && request.auth.uid == teacherId;
-      
-      // السماح بقراءة إعدادات المدرسين للجميع (ضروري لصفحة الدعوة)
-      // هذا آمن لأن الإعدادات تحتوي فقط على معلومات العرض العامة
+   // ===== قواعد إعدادات المدرسين =====
+   match /teacherSettings/{teacherId} {
+     // السماح للمدرس بقراءة وكتابة إعداداته الخاصة
+     allow write: if request.auth != null && request.auth.uid == teacherId;
+
+      // السماح للمساعد المرتبط بالمدرس بكتابة إعدادات المنصة بشرط امتلاكه صلاحيات التخصيص
+      allow write: if request.auth != null &&
+        exists(/databases/$(database)/documents/teachers/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.proxyOf == teacherId &&
+        (
+          'edit_platform_settings' in get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.allowedActions ||
+          'select_theme' in get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.allowedActions ||
+          'customize_hero' in get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.allowedActions ||
+          'manage_invite_features' in get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.allowedActions ||
+          'configure_social_media' in get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.allowedActions ||
+          'manage_whatsapp' in get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.allowedActions
+        );
+     
+     // السماح بإنشاء مستند إعدادات جديد للمدرس
+     allow create: if request.auth != null && (request.auth.uid == teacherId || (
+        // السماح للمساعد بإنشاء مستند الإعدادات إذا كانت لديه صلاحية التخصيص
+        exists(/databases/$(database)/documents/teachers/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.proxyOf == teacherId &&
+        (
+          'edit_platform_settings' in get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.allowedActions ||
+          'select_theme' in get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.allowedActions ||
+          'customize_hero' in get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.allowedActions ||
+          'manage_invite_features' in get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.allowedActions ||
+          'configure_social_media' in get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.allowedActions ||
+          'manage_whatsapp' in get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.allowedActions
+        )
+     ));
+     
+     // السماح بقراءة إعدادات المدرسين للجميع (ضروري لصفحة الدعوة)
+     // هذا آمن لأن الإعدادات تحتوي فقط على معلومات العرض العامة
       allow read: if true;
       
       // السماح للأدمن بقراءة وكتابة جميع إعدادات المدرسين
@@ -325,6 +424,16 @@ service cloud.firestore {
       allow read: if true;
       
       // السماح للأدمن فقط بكتابة الإعدادات
+      allow write: if request.auth != null && 
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    // ===== قواعد خطط التسعير =====
+    match /pricingPlans/{planId} {
+      // القراءة متاحة للجميع لعرض الباقات
+      allow read: if true;
+
+      // الكتابة للأدمن فقط لإدارة الباقات من لوحة التحكم
       allow write: if request.auth != null && 
         exists(/databases/$(database)/documents/admins/$(request.auth.uid));
     }
@@ -426,6 +535,28 @@ service cloud.firestore {
 
       // الحذف: الأدمن فقط
       allow delete: if request.auth != null &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    // ===== قواعد المدفوعات =====
+    match /payments/{paymentId} {
+      // إنشاء سجل دفع: المدرس فقط لنفسه، بحقول محددة، وحالة محدودة
+      allow create: if request.auth != null &&
+        request.resource.data.teacherId == request.auth.uid &&
+        request.resource.data.status in ['pending', 'confirmed', 'rejected'] &&
+        request.resource.data.keys().hasAll([
+          'teacherId', 'teacherName', 'planName', 'period',
+          'amount', 'currency', 'walletNumber', 'receiptBase64', 'status'
+        ]);
+
+      // القراءة: المدرس يقرأ سجلاته + الأدمن يقرأ كل شيء
+      allow read: if request.auth != null && (
+        resource.data.teacherId == request.auth.uid ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+
+      // التحديث والحذف: الأدمن فقط (لتغيير الحالة أو إدارة السجلات)
+      allow update, delete: if request.auth != null &&
         exists(/databases/$(database)/documents/admins/$(request.auth.uid));
     }
   }

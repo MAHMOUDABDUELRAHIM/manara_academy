@@ -15,6 +15,27 @@ import {
 } from 'firebase/firestore';
 import { db } from '@/firebase/config';
 
+// Helper: remove undefined deeply from objects/arrays (Firestore forbids undefined)
+function stripUndefinedDeep(obj: any): any {
+  if (obj === undefined) return undefined;
+  if (Array.isArray(obj)) {
+    const mapped = obj.map((v) => stripUndefinedDeep(v));
+    return mapped.filter((v) => v !== undefined);
+  }
+  if (obj && typeof obj === 'object') {
+    const out: any = {};
+    Object.keys(obj).forEach((k) => {
+      const v = (obj as any)[k];
+      if (v !== undefined) {
+        const cleaned = stripUndefinedDeep(v);
+        if (cleaned !== undefined) out[k] = cleaned;
+      }
+    });
+    return out;
+  }
+  return obj;
+}
+
 export interface TeacherProfile {
   id: string;
   uid: string;
@@ -56,7 +77,8 @@ export class TeacherService {
         uid,
         fullName,
         email,
-        subjectSpecialization,
+        // Firestore لا يقبل undefined؛ نضمن قيمة سلسلة بدلًا من undefined
+        subjectSpecialization: subjectSpecialization || '',
         photoURL: '',
         bio: '',
         createdAt: new Date().toISOString(),
@@ -68,7 +90,8 @@ export class TeacherService {
 
       // استخدام setDoc مع uid كمعرف المستند لضمان التطابق مع قواعد الأمان
       const teacherRef = doc(db, 'teachers', uid);
-      await setDoc(teacherRef, teacherProfile);
+      // إزالة أي undefined عميق قبل الحفظ
+      await setDoc(teacherRef, stripUndefinedDeep(teacherProfile));
       
       return {
         id: uid,
@@ -87,9 +110,23 @@ export class TeacherService {
       const teacherSnap = await getDoc(teacherRef);
       
       if (teacherSnap.exists()) {
+        const data = teacherSnap.data() as any;
+        // دعم حسابات المساعدين: إذا كان المستند يحتوي على proxyOf
+        // نعيد بيانات المدرس الرئيسي المرتبط بالمساعد
+        if (data && typeof data.proxyOf === 'string' && data.proxyOf.length > 0) {
+          const mainRef = doc(db, 'teachers', data.proxyOf);
+          const mainSnap = await getDoc(mainRef);
+          if (mainSnap.exists()) {
+            const mainData = mainSnap.data();
+            return {
+              id: data.proxyOf,
+              ...(mainData as any)
+            } as TeacherProfile;
+          }
+        }
         return {
           id: teacherSnap.id,
-          ...teacherSnap.data()
+          ...data
         } as TeacherProfile;
       } else {
         return null;
@@ -475,10 +512,10 @@ export class TeacherService {
   ): Promise<void> {
     try {
       const teacherRef = doc(db, 'teachers', teacherId);
-      await updateDoc(teacherRef, {
+      await updateDoc(teacherRef, stripUndefinedDeep({
         ...updates,
         updatedAt: new Date().toISOString()
-      });
+      }));
     } catch (error) {
       console.error('Error updating teacher profile:', error);
       throw error;

@@ -1,4 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { toast } from 'sonner';
+import { auth, db } from '@/firebase/config';
+import { doc, getDoc, setDoc, serverTimestamp, collection, onSnapshot, updateDoc } from 'firebase/firestore';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -84,6 +87,8 @@ const Settings: React.FC = () => {
     language: 'ar',
     timezone: 'UTC+3'
   });
+  // Trial Settings State (unit: 'days' | 'minutes', value: number)
+  const [trialSettings, setTrialSettings] = useState<{ unit: 'days' | 'minutes'; value: number }>({ unit: 'days', value: 1 });
 
   // Payment Settings State
   const [paymentSettings, setPaymentSettings] = useState({
@@ -108,35 +113,44 @@ const Settings: React.FC = () => {
   });
 
   // Mock Plans Data
-  const [plans, setPlans] = useState<Plan[]>([
-    {
-      id: '1',
-      name: 'مجاني',
-      price: 0,
-      duration: 'شهري',
-      features: ['الوصول لـ 3 دورات', 'دعم المجتمع', 'شهادة إتمام'],
-      isPopular: false,
-      status: 'active'
-    },
-    {
-      id: '2',
-      name: 'قياسي',
-      price: 29,
-      duration: 'شهري',
-      features: ['الوصول لجميع الدورات', 'دعم مباشر', 'شهادات معتمدة', 'مشاريع عملية'],
-      isPopular: true,
-      status: 'active'
-    },
-    {
-      id: '3',
-      name: 'احترافي',
-      price: 99,
-      duration: 'شهري',
-      features: ['كل ميزات القياسي', 'جلسات فردية', 'مراجعة الكود', 'وصول مبكر للدورات', 'مجتمع VIP'],
-      isPopular: false,
-      status: 'active'
-    }
-  ]);
+  const [plans, setPlans] = useState<Plan[]>([]);
+
+  // Load and subscribe to pricing plans from Firestore collection
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'pricingPlans'), (snap) => {
+      const arr: Plan[] = [];
+      snap.forEach((docSnap) => {
+        const d = docSnap.data() as any;
+        const price = typeof d?.prices?.USD === 'number' ? d.prices.USD
+          : typeof d?.priceUsd === 'number' ? d.priceUsd
+          : typeof d?.priceUSD === 'number' ? d.priceUSD
+          : typeof d?.price === 'number' ? d.price
+          : 0;
+        const duration = typeof d?.period === 'string' ? d.period
+          : typeof d?.duration === 'string' ? d.duration
+          : 'شهري';
+        arr.push({
+          id: docSnap.id,
+          name: d?.name || 'خطة',
+          price: price,
+          duration: duration,
+          features: Array.isArray(d?.features) ? d.features : [],
+          isPopular: !!d?.popular,
+          status: (d?.status === 'inactive') ? 'inactive' : 'active',
+        });
+      });
+      // Optional: sort by order if present
+      arr.sort((a, b) => {
+        const ao = typeof (snap.docs.find(x => x.id === a.id)?.data() as any)?.order === 'number' ? (snap.docs.find(x => x.id === a.id)?.data() as any).order : 0;
+        const bo = typeof (snap.docs.find(x => x.id === b.id)?.data() as any)?.order === 'number' ? (snap.docs.find(x => x.id === b.id)?.data() as any).order : 0;
+        return ao - bo;
+      });
+      setPlans(arr);
+    }, (error) => {
+      console.error('Failed to subscribe pricing plans:', error);
+    });
+    return () => unsub();
+  }, []);
 
   const tabs = [
     { id: 'general', label: language === 'ar' ? 'الإعدادات العامة' : 'General Settings', icon: Globe },
@@ -149,11 +163,92 @@ const Settings: React.FC = () => {
     console.log('Saving general settings:', generalSettings);
     // Mock save functionality
   };
+  const handleSaveTrial = async () => {
+    try {
+      await setDoc(doc(db, 'settings', 'trial'), {
+        unit: trialSettings.unit,
+        value: Number(trialSettings.value) || 1,
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+      try { localStorage.setItem('trialSettings', JSON.stringify(trialSettings)); } catch {}
+      toast.success(language === 'ar' ? 'تم تحديث مدة الفترة التجريبية.' : 'Trial duration updated.');
+    } catch (error) {
+      console.error('Failed to save trial settings:', error);
+      toast.error(language === 'ar' ? 'تعذر حفظ إعدادات التجربة' : 'Failed to save trial settings');
+    }
+  };
 
   const handleSavePayment = () => {
     console.log('Saving payment settings:', paymentSettings);
-    // Mock save functionality
+    // Save currency in Firestore so the entire site reflects it
+    setDoc(doc(db, 'settings', 'payment'), {
+      currency: paymentSettings.currency,
+      minimumPayout: paymentSettings.minimumPayout,
+      payoutSchedule: paymentSettings.payoutSchedule,
+      stripeEnabled: paymentSettings.stripeEnabled,
+      paypalEnabled: paymentSettings.paypalEnabled,
+      bankTransferEnabled: paymentSettings.bankTransferEnabled,
+      commissionRate: paymentSettings.commissionRate,
+      updatedAt: serverTimestamp(),
+    }, { merge: true })
+    .then(() => {
+      toast.success(language === 'ar' ? 'تم حفظ العملة وتطبيقها على الباقات تلقائيًا.' : 'Currency saved and applied to plans automatically.');
+    })
+    .catch(() => {
+      toast.error(language === 'ar' ? 'تعذر حفظ الإعدادات، حاول مجددًا.' : 'Failed to save settings, please try again.');
+    });
   };
+
+  // Load payment settings (including currency) from Firestore on mount
+  useEffect(() => {
+    const loadPaymentSettings = async () => {
+      try {
+        const snap = await getDoc(doc(db, 'settings', 'payment'));
+        if (snap.exists()) {
+          const data = snap.data();
+          setPaymentSettings((prev) => ({
+            currency: (data.currency === 'USD' || data.currency === 'EGP' || data.currency === 'JOD') ? data.currency : prev.currency,
+            minimumPayout: typeof data.minimumPayout === 'number' ? data.minimumPayout : prev.minimumPayout,
+            payoutSchedule: typeof data.payoutSchedule === 'string' ? data.payoutSchedule : prev.payoutSchedule,
+            stripeEnabled: typeof data.stripeEnabled === 'boolean' ? data.stripeEnabled : prev.stripeEnabled,
+            paypalEnabled: typeof data.paypalEnabled === 'boolean' ? data.paypalEnabled : prev.paypalEnabled,
+            bankTransferEnabled: typeof data.bankTransferEnabled === 'boolean' ? data.bankTransferEnabled : prev.bankTransferEnabled,
+            commissionRate: typeof data.commissionRate === 'number' ? data.commissionRate : prev.commissionRate,
+          }));
+        }
+      } catch (error) {
+        console.error('Failed to load payment settings:', error);
+      }
+    };
+    loadPaymentSettings();
+  }, []);
+  // Load trial settings on mount
+  useEffect(() => {
+    const loadTrialSettings = async () => {
+      try {
+        const snap = await getDoc(doc(db, 'settings', 'trial'));
+        if (snap.exists()) {
+          const data = snap.data() as any;
+          const unit = (data.unit === 'minutes') ? 'minutes' : 'days';
+          const value = typeof data.value === 'number' && data.value > 0 ? data.value : 1;
+          setTrialSettings({ unit, value });
+        } else {
+          try {
+            const cached = localStorage.getItem('trialSettings');
+            if (cached) {
+              const parsed = JSON.parse(cached);
+              if (parsed && (parsed.unit === 'days' || parsed.unit === 'minutes') && typeof parsed.value === 'number') {
+                setTrialSettings(parsed);
+              }
+            }
+          } catch {}
+        }
+      } catch (error) {
+        console.error('Failed to load trial settings:', error);
+      }
+    };
+    loadTrialSettings();
+  }, []);
 
   const handleSaveNotifications = () => {
     console.log('Saving notification settings:', notificationSettings);
@@ -165,11 +260,51 @@ const Settings: React.FC = () => {
     setIsEditingPlan(true);
   };
 
-  const handleSavePlan = () => {
-    if (selectedPlan) {
-      setPlans(plans.map(p => p.id === selectedPlan.id ? selectedPlan : p));
+  const handleSavePlan = async () => {
+    if (!selectedPlan) return;
+    try {
+      // Require admin privileges to write pricing plans
+      const uid = auth.currentUser?.uid;
+      if (!uid) {
+        toast.error(language === 'ar' ? 'يجب تسجيل الدخول كمشرف أولاً.' : 'You must sign in as an admin.');
+        return;
+      }
+      const isAdmin = await getDoc(doc(db, 'admins', uid));
+      if (!isAdmin.exists()) {
+        toast.error(language === 'ar' ? 'لا تملك صلاحيات الأدمن لكتابة الباقات.' : 'Admin privileges required to manage plans.');
+        return;
+      }
+
+      const priceNumber = Number.isFinite(Number(selectedPlan.price)) ? Number(selectedPlan.price) : 0;
+      const payload: any = {
+        name: selectedPlan.name,
+        // store USD as base; teacher سيحوّل بحسب العملة
+        priceUSD: priceNumber,
+        period: selectedPlan.duration,
+        features: selectedPlan.features,
+        popular: selectedPlan.isPopular,
+        status: selectedPlan.status,
+        updatedAt: serverTimestamp(),
+      };
+      // If plan exists (by id) update; otherwise create with given id
+      const exists = plans.some(p => p.id === selectedPlan.id);
+      if (exists) {
+        await updateDoc(doc(db, 'pricingPlans', selectedPlan.id), payload);
+      } else {
+        // create with this id to keep current behavior
+        await setDoc(doc(db, 'pricingPlans', selectedPlan.id), { ...payload, createdAt: serverTimestamp() });
+      }
+      toast.success(language === 'ar' ? 'تم حفظ الخطة في Firestore.' : 'Plan saved to Firestore.');
       setIsEditingPlan(false);
       setSelectedPlan(null);
+    } catch (err: any) {
+      console.error('Failed to save plan:', err);
+      const msg = err?.code || err?.message || '';
+      toast.error(
+        language === 'ar'
+          ? `تعذّر حفظ الخطة (${msg || 'خطأ غير معروف'})`
+          : `Failed to save plan (${msg || 'Unknown error'})`
+      );
     }
   };
 
@@ -310,6 +445,48 @@ const Settings: React.FC = () => {
                   </div>
                 </div>
 
+                {/* Trial duration settings */}
+                <div className="space-y-4 border rounded-lg p-4">
+                  <h3 className="text-lg font-semibold">
+                    {language === 'ar' ? 'مدة الفترة التجريبية' : 'Trial Period Duration'}
+                  </h3>
+                  <p className="text-sm text-muted-foreground">
+                    {language === 'ar'
+                      ? 'اختر وحدة المدة (أيام أو دقائق) وحدد القيمة. سيتم تطبيق التغيير فورًا على جميع المدرسين الذين ما زالت فترة تجربتهم مفتوحة.'
+                      : 'Choose unit (days or minutes) and set value. Change applies immediately to all teachers with open trials.'}
+                  </p>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="trialUnit">{language === 'ar' ? 'الوحدة' : 'Unit'}</Label>
+                      <Select value={trialSettings.unit} onValueChange={(value) => setTrialSettings({ ...trialSettings, unit: (value as any) })}>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="days">{language === 'ar' ? 'أيام' : 'Days'}</SelectItem>
+                          <SelectItem value="minutes">{language === 'ar' ? 'دقائق' : 'Minutes'}</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="trialValue">{language === 'ar' ? 'القيمة' : 'Value'}</Label>
+                      <Input
+                        id="trialValue"
+                        type="number"
+                        min={1}
+                        value={trialSettings.value}
+                        onChange={(e) => setTrialSettings({ ...trialSettings, value: parseInt(e.target.value) || 1 })}
+                      />
+                    </div>
+                    <div className="flex items-end">
+                      <Button onClick={handleSaveTrial} className="w-full md:w-auto">
+                        <Save className="h-4 w-4 mr-2" />
+                        {language === 'ar' ? 'حفظ مدة التجربة' : 'Save Trial Duration'}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+
                 <Button onClick={handleSaveGeneral} className="w-full md:w-auto">
                   <Save className="h-4 w-4 mr-2" />
                   {language === 'ar' ? 'حفظ التغييرات' : 'Save Changes'}
@@ -337,9 +514,8 @@ const Settings: React.FC = () => {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="USD">USD - US Dollar</SelectItem>
-                        <SelectItem value="EUR">EUR - Euro</SelectItem>
-                        <SelectItem value="SAR">SAR - Saudi Riyal</SelectItem>
-                        <SelectItem value="AED">AED - UAE Dirham</SelectItem>
+                        <SelectItem value="EGP">EGP - Egyptian Pound</SelectItem>
+                        <SelectItem value="JOD">JOD - Jordanian Dinar</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -660,7 +836,13 @@ const Settings: React.FC = () => {
                         id="planPrice"
                         type="number"
                         value={selectedPlan.price}
-                        onChange={(e) => setSelectedPlan({...selectedPlan, price: parseInt(e.target.value)})}
+                        onChange={(e) => {
+                          const val = parseFloat(e.target.value);
+                          setSelectedPlan({
+                            ...selectedPlan,
+                            price: Number.isFinite(val) ? val : 0,
+                          });
+                        }}
                       />
                     </div>
                   </div>
@@ -673,8 +855,9 @@ const Settings: React.FC = () => {
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
+                          <SelectItem value="ثانوي">{language === 'ar' ? 'ثانوي' : 'Secondary'}</SelectItem>
+                          <SelectItem value="نصف ثانوي">{language === 'ar' ? 'نصف ثانوي' : 'Half-Secondary'}</SelectItem>
                           <SelectItem value="شهري">{language === 'ar' ? 'شهري' : 'Monthly'}</SelectItem>
-                          <SelectItem value="سنوي">{language === 'ar' ? 'سنوي' : 'Yearly'}</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>

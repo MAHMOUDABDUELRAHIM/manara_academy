@@ -14,6 +14,7 @@ import StudentRegister from "./pages/StudentRegister";
 import TeacherRegister from "./pages/TeacherRegister";
 import StudentDashboard from "./pages/StudentDashboard";
 import TeacherDashboard from "./pages/TeacherDashboard";
+import VerifyTeacherEmail from "./pages/VerifyTeacherEmail";
 import AdminDashboard from "./pages/AdminDashboard";
 import MyCourses from "./pages/MyCourses";
 import CourseCatalog from "./pages/CourseCatalog";
@@ -25,6 +26,7 @@ import InviteStudents from "./pages/teacher/InviteStudents";
 import Payouts from "./pages/teacher/Payouts";
 import { AddLesson } from "./pages/teacher/AddLesson";
 import TeacherAssessments from "./pages/teacher/Assessments";
+import TeacherSettings from "./pages/teacher/Settings";
 
 import ManageUsers from "./pages/admin/ManageUsers";
 import ManageCourses from "./pages/admin/ManageCourses";
@@ -62,6 +64,7 @@ import ErrorBoundary from "@/components/ErrorBoundary";
               <Route path="/register/student" element={<StudentRegister />} />
               <Route path="/register/student/:code" element={<StudentRegister />} />
               <Route path="/register/teacher" element={<TeacherRegister />} />
+              <Route path="/verify-teacher-email" element={<VerifyTeacherEmail />} />
               <Route path="/invite/:teacherId" element={<InvitePage />} />
               <Route path="/dashboard" element={
                 <ProtectedRoute requiredRole="student" loginPath="/student-login">
@@ -126,6 +129,11 @@ import ErrorBoundary from "@/components/ErrorBoundary";
               <Route path="/teacher-dashboard/assessments" element={
                 <ProtectedRoute requiredRole="teacher">
                   <TeacherAssessments />
+                </ProtectedRoute>
+              } />
+              <Route path="/teacher-dashboard/settings" element={
+                <ProtectedRoute requiredRole="teacher">
+                  <TeacherSettings />
                 </ProtectedRoute>
               } />
 

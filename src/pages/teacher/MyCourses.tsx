@@ -41,6 +41,7 @@ import {
 import { Trash } from "lucide-react";
 import { VideoService } from "@/services/videoService";
 import { StudentService } from "@/services/studentService";
+import { TeacherService } from "@/services/teacherService";
 
 interface Course {
   id: string;
@@ -60,6 +61,22 @@ export const TeacherMyCourses = () => {
 const { language, t } = useLanguage();
 const { user } = useAuthContext();
 const teacherName = user?.displayName || (language === 'ar' ? 'مدرس جديد' : 'New Teacher');
+  // حساب معرف المدرس الفعّال (يدعم حسابات المساعد عبر proxyOf)
+  const [effectiveTeacherId, setEffectiveTeacherId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const resolveEffectiveTeacher = async () => {
+      if (!user?.uid) return;
+      try {
+        const profile = await TeacherService.getTeacherByUid(user.uid);
+        const effId = profile?.id || user.uid;
+        setEffectiveTeacherId(effId);
+      } catch (e) {
+        setEffectiveTeacherId(user.uid);
+      }
+    };
+    resolveEffectiveTeacher();
+  }, [user?.uid]);
   
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -83,14 +100,13 @@ const teacherName = user?.displayName || (language === 'ar' ? 'مدرس جديد
   const [isDeletingCourse, setIsDeletingCourse] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
 
-  // Ø¬Ù„Ø¨ Ø¯ÙˆØ±Ø§Øª Ø§Ù„Ù…Ø¯Ø±Ø³
+  // Ø¬Ù„Ø¨ Ø¯ÙˆØ±Ø§Øª Ø§Ù„Ù…Ø¯Ø±Ø³ (بالمعرف الفعّال)
   useEffect(() => {
     const fetchCourses = async () => {
-      if (!user?.uid) return;
-      
+      if (!effectiveTeacherId) return;
       try {
         setIsLoadingCourses(true);
-        const instructorCourses = await CourseService.getInstructorCourses(user.uid);
+        const instructorCourses = await CourseService.getInstructorCourses(effectiveTeacherId);
         setCourses(instructorCourses);
       } catch (error) {
         console.error('Ø®Ø·Ø£ ÙÙŠ Ø¬Ù„Ø¨ Ø§Ù„Ø¯ÙˆØ±Ø§Øª:', error);
@@ -100,12 +116,12 @@ const teacherName = user?.displayName || (language === 'ar' ? 'مدرس جديد
     };
 
     fetchCourses();
-  }, [user?.uid]);
+  }, [effectiveTeacherId]);
 
   // Calculate total students count from confirmed access (enrolledCourses)
   useEffect(() => {
     const computeCounts = async () => {
-      if (!user?.uid || courses.length === 0) {
+      if (!effectiveTeacherId || courses.length === 0) {
         setCourseStudentsCount({});
         setTotalStudentsCount(0);
         return;
@@ -115,7 +131,7 @@ const teacherName = user?.displayName || (language === 'ar' ? 'مدرس جديد
         try {
           const q = query(
             collection(db, 'students'),
-            where('teacherId', '==', user.uid),
+            where('teacherId', '==', effectiveTeacherId),
             where('enrolledCourses', 'array-contains', course.id)
           );
           const snap = await getDocs(q);
@@ -128,13 +144,13 @@ const teacherName = user?.displayName || (language === 'ar' ? 'مدرس جديد
       setTotalStudentsCount(Object.values(counts).reduce((sum, n) => sum + n, 0));
     };
     computeCounts();
-  }, [courses, user?.uid]);
+  }, [courses, effectiveTeacherId]);
   // Live subscription: update counts instantly when teacher grants access
   useEffect(() => {
-    if (!user?.uid || courses.length === 0) return;
+    if (!effectiveTeacherId || courses.length === 0) return;
     const studentsQ = query(
       collection(db, 'students'),
-      where('teacherId', '==', user.uid)
+      where('teacherId', '==', effectiveTeacherId)
     );
     const unsub = onSnapshot(studentsQ, (snap) => {
       const counts: Record<string, number> = {};
@@ -150,7 +166,7 @@ const teacherName = user?.displayName || (language === 'ar' ? 'مدرس جديد
       setTotalStudentsCount(Object.values(counts).reduce((sum, n) => sum + n, 0));
     });
     return () => unsub();
-  }, [user?.uid, courses]);
+  }, [effectiveTeacherId, courses]);
 
   // Calculate active courses count: any course in "My Courses" is considered active
   const activeCourses = courses.length;
@@ -277,8 +293,8 @@ const teacherName = user?.displayName || (language === 'ar' ? 'مدرس جديد
       });
   toast.success(language === 'ar' ? 'تم حفظ التعديلات بنجاح' : 'Changes saved successfully');
       // ØªØ­Ø¯ÙŠØ« Ù‚Ø§Ø¦Ù…Ø© Ø§Ù„Ø¯ÙˆØ±Ø§Øª Ø¨Ø¹Ø¯ Ø§Ù„Ø­ÙØ¸
-      if (user?.uid) {
-        const instructorCourses = await CourseService.getInstructorCourses(user.uid);
+      if (effectiveTeacherId) {
+        const instructorCourses = await CourseService.getInstructorCourses(effectiveTeacherId);
         setCourses(instructorCourses);
       }
       setEditingCourseId(null);

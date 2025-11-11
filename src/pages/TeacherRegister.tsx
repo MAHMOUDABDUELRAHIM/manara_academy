@@ -12,6 +12,8 @@ import { useLanguage } from '@/contexts/LanguageContext';
 import { PasswordStrengthIndicator } from '@/components/PasswordStrengthIndicator';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
+import { auth } from '@/firebase/config';
+import { sendEmailVerification } from 'firebase/auth';
 
 const TeacherRegister = () => {
   const { language, t } = useLanguage();
@@ -84,6 +86,11 @@ const TeacherRegister = () => {
     
     if (validateForm()) {
       try {
+        // Hint auth flow about intended role to avoid race with profile write
+        try {
+          localStorage.setItem('pendingRole', 'teacher');
+        } catch {}
+
         // Register teacher with Firebase
         await register(formData.email, formData.password, {
           fullName: formData.fullName,
@@ -91,10 +98,20 @@ const TeacherRegister = () => {
           subjectSpecialization: formData.subjectSpecialization,
         });
         
-        toast.success(language === 'ar' ? 'تم إنشاء الحساب بنجاح! يرجى تسجيل الدخول.' : 'Account created successfully! Please log in.');
-        
-        // Redirect to login page after successful registration
-        navigate('/login');
+        toast.success(language === 'ar' ? 'تم إنشاء الحساب وتم تسجيل الدخول تلقائيًا' : 'Account created and logged in automatically');
+
+        // Send Firebase verification email and navigate to verify page
+        try {
+          if (auth.currentUser) {
+            await sendEmailVerification(auth.currentUser);
+          }
+        } catch (sendErr: any) {
+          console.warn('Failed to send Firebase verification email. User can retry on verify page:', sendErr);
+          if (sendErr?.code === 'auth/too-many-requests') {
+            toast.error(language === 'ar' ? 'طلبات كثيرة. حاول لاحقاً.' : 'Too many requests. Try again later.');
+          }
+        }
+        navigate('/verify-teacher-email');
       } catch (error: any) {
         console.error('Teacher registration error:', error);
         

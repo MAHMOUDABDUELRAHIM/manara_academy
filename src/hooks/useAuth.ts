@@ -25,6 +25,9 @@ interface UserProfile {
   status?: string;
   parentPhone?: string;
   studentPhone?: string;
+  emailVerified?: boolean;
+  // Added to support trial period logic for teachers
+  createdAt?: string;
 }
 
 interface AuthUser {
@@ -51,6 +54,11 @@ export const useAuth = () => {
           let userProfile: UserProfile = {};
           let role: 'student' | 'teacher' | 'admin' | undefined;
 
+          // Respect pending role hint set during registration to avoid student fallback
+          const pendingRole = (() => {
+            try { return localStorage.getItem('pendingRole'); } catch { return null; }
+          })();
+
           if (isAdminEmail) {
             // Handle admin user
             let admin = await AdminService.getAdminByUid(firebaseUser.uid);
@@ -75,10 +83,20 @@ export const useAuth = () => {
             const teacher = await TeacherService.getTeacherByUid(firebaseUser.uid);
             if (teacher) {
               userProfile = {
-              fullName: teacher.fullName,
-              role: 'teacher',
-              subjectSpecialization: teacher.subjectSpecialization
-            };
+                fullName: teacher.fullName,
+                role: 'teacher',
+                subjectSpecialization: teacher.subjectSpecialization,
+                emailVerified: !!(teacher as any).emailVerified,
+                createdAt: (teacher as any).createdAt || undefined,
+              };
+              role = 'teacher';
+            } else if (pendingRole === 'teacher') {
+              // Temporary teacher role based on registration hint to prevent redirect to student dashboard
+              userProfile = {
+                fullName: firebaseUser.displayName || '',
+                role: 'teacher',
+                emailVerified: false,
+              };
               role = 'teacher';
             } else {
               // Check if user is a student
@@ -138,6 +156,13 @@ export const useAuth = () => {
             role: role,
             profile: userProfile,
           });
+
+          // Clear pending role hint only when role is resolved to teacher
+          try {
+            if (pendingRole && role === 'teacher') {
+              localStorage.removeItem('pendingRole');
+            }
+          } catch {}
         } catch (error) {
           console.error('Error in onAuthStateChanged:', error);
           setUser(null);
@@ -193,7 +218,9 @@ export const useAuth = () => {
             fullName: teacher.fullName,
             role: 'teacher',
             subjectSpecialization: teacher.subjectSpecialization,
-            inviteCode: teacher.inviteCode
+            inviteCode: (teacher as any).inviteCode,
+            emailVerified: !!(teacher as any).emailVerified,
+            createdAt: (teacher as any).createdAt || undefined,
           };
           role = 'teacher';
         } else {
@@ -227,41 +254,73 @@ export const useAuth = () => {
       setError(null);
       setLoading(true);
       const result = await createUserWithEmailAndPassword(auth, email, password);
+      // Optimistically set local user state with intended role to ensure correct routing immediately
+      if (result.user && userProfile?.role) {
+        try {
+          // Persist pending role hint for auth state reconciliation
+          localStorage.setItem('pendingRole', userProfile.role);
+        } catch {}
+        setUser({
+          uid: result.user.uid,
+          email: result.user.email,
+          displayName: userProfile.fullName || result.user.displayName,
+          photoURL: result.user.photoURL,
+          role: userProfile.role,
+          profile: userProfile,
+        });
+      }
       
+      // تحديث اسم العرض للمستخدم الجديد (لا نجعل أي فشل هنا يوقف التسجيل)
       if (userProfile?.fullName && result.user) {
-        await updateProfile(result.user, { displayName: userProfile.fullName });
+        try {
+          await updateProfile(result.user, { displayName: userProfile.fullName });
+        } catch (profileErr) {
+          console.warn('Non-critical: failed to update displayName after registration:', profileErr);
+        }
       }
       
       // Create profile in appropriate collection based on role
       if (result.user && userProfile) {
         if (userProfile.role === 'teacher') {
-          // Create teacher profile
-          await TeacherService.createTeacherProfile(
-            result.user.uid,
-            userProfile.fullName || '',
-            result.user.email || '',
-            userProfile.subjectSpecialization
-          );
+          // Create teacher profile (غير حرج: لو فشل لا نوقف التسجيل)
+          try {
+            await TeacherService.createTeacherProfile(
+              result.user.uid,
+              userProfile.fullName || '',
+              result.user.email || '',
+              userProfile.subjectSpecialization
+            );
+          } catch (createErr) {
+            console.error('Non-critical: failed to create teacher profile:', createErr);
+          }
         } else if (userProfile.role === 'student') {
           // Create student profile with phone numbers
-          await StudentService.createStudentProfile(
-            result.user.uid,
-            userProfile.fullName || '',
-            result.user.email || '',
-            result.user.photoURL || undefined,
-            userProfile.parentPhone,
-            userProfile.studentPhone
-          );
+          try {
+            await StudentService.createStudentProfile(
+              result.user.uid,
+              userProfile.fullName || '',
+              result.user.email || '',
+              result.user.photoURL || undefined,
+              userProfile.parentPhone,
+              userProfile.studentPhone
+            );
+          } catch (createErr) {
+            console.error('Non-critical: failed to create student profile:', createErr);
+          }
         } else if (userProfile.role === 'admin') {
           // Create admin profile
-          await AdminService.createAdminProfile({
-            uid: result.user.uid,
-            fullName: userProfile.fullName || '',
-            email: result.user.email || '',
-            role: 'admin',
-            isActive: true,
-            permissions: []
-          });
+          try {
+            await AdminService.createAdminProfile({
+              uid: result.user.uid,
+              fullName: userProfile.fullName || '',
+              email: result.user.email || '',
+              role: 'admin',
+              isActive: true,
+              permissions: []
+            });
+          } catch (createErr) {
+            console.error('Non-critical: failed to create admin profile:', createErr);
+          }
         }
       }
       
@@ -311,7 +370,9 @@ export const useAuth = () => {
         userProfile = {
           fullName: teacher.fullName,
           role: 'teacher',
-          subjectSpecialization: teacher.subjectSpecialization
+          subjectSpecialization: teacher.subjectSpecialization,
+          emailVerified: !!(teacher as any).emailVerified,
+          createdAt: (teacher as any).createdAt || undefined,
         };
         role = 'teacher';
       } else {
@@ -372,7 +433,9 @@ export const useAuth = () => {
         userProfile = {
           fullName: teacher.fullName,
           role: 'teacher',
-          subjectSpecialization: teacher.subjectSpecialization
+          subjectSpecialization: teacher.subjectSpecialization,
+          emailVerified: !!(teacher as any).emailVerified,
+          createdAt: (teacher as any).createdAt || undefined,
         };
         role = 'teacher';
       } else {

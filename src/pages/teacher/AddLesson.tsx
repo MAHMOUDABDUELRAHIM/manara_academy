@@ -41,7 +41,7 @@ export const AddLesson = () => {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [isUploading, setIsUploading] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
-  const [bunnyGuid, setBunnyGuid] = useState<string | null>(null);
+  const [uploadedVideoUrl, setUploadedVideoUrl] = useState<string | null>(null);
 
   const handleInputChange = (field: keyof LessonData, value: string) => {
     setLessonData(prev => ({
@@ -71,15 +71,15 @@ export const AddLesson = () => {
         videoFile: file
       }));
 
-      // رفع الفيديو فعلياً إلى Bunny عبر الـ API
-      uploadVideoToBunny(file);
+      // رفع الفيديو فعلياً إلى مخزن S3 عبر الـ API
+      uploadVideoToS3(file);
     }
   };
 
-  const uploadVideoToBunny = async (file: File) => {
+  const uploadVideoToS3 = async (file: File) => {
     setIsUploading(true);
     setUploadProgress(0);
-    const endpoint = `/api/upload-bunny-video`;
+    const endpoint = `/api/upload-s3-video`;
     const form = new FormData();
     form.append('video', file);
     if (lessonData.title) form.append('title', lessonData.title);
@@ -115,19 +115,19 @@ export const AddLesson = () => {
       xhr.onerror = () => {
         clearFallback();
         setIsUploading(false);
-        setBunnyGuid(null);
+        setUploadedVideoUrl(null);
         toast.error(language === 'ar' ? 'فشل الاتصال بالسيرفر أثناء الرفع.' : 'Failed to connect to server during upload.');
       };
       xhr.onabort = () => {
         clearFallback();
         setIsUploading(false);
-        setBunnyGuid(null);
+        setUploadedVideoUrl(null);
         toast.error(language === 'ar' ? 'تم إلغاء عملية الرفع.' : 'Upload was aborted.');
       };
       xhr.ontimeout = () => {
         clearFallback();
         setIsUploading(false);
-        setBunnyGuid(null);
+        setUploadedVideoUrl(null);
         toast.error(language === 'ar' ? 'انتهت مهلة الاتصال أثناء الرفع.' : 'Upload timed out.');
       };
 
@@ -143,12 +143,12 @@ export const AddLesson = () => {
 
         if (status >= 200 && status < 300 && data?.success) {
           setUploadProgress(100);
-          setBunnyGuid(data.guid);
-          toast.success(language === 'ar' ? 'تم رفع الفيديو إلى Bunny بنجاح!' : 'Video uploaded to Bunny successfully!');
+          setUploadedVideoUrl(data.url);
+          toast.success(language === 'ar' ? 'تم رفع الفيديو بنجاح!' : 'Video uploaded successfully!');
         } else {
           const msg = (data?.message && data?.error) ? `${data.message}: ${data.error}`
                     : (data?.message || `Upload failed with status ${status}`);
-          setBunnyGuid(null);
+          setUploadedVideoUrl(null);
           toast.error(language === 'ar' ? `فشل الرفع: ${msg}` : `Upload failed: ${msg}`);
         }
         setIsUploading(false);
@@ -158,7 +158,7 @@ export const AddLesson = () => {
     } catch (err) {
       console.error(err);
       setIsUploading(false);
-      setBunnyGuid(null);
+      setUploadedVideoUrl(null);
       toast.error(language === 'ar' ? 'حدث خطأ غير متوقع أثناء الرفع.' : 'Unexpected error occurred during upload.');
     }
   };
@@ -175,8 +175,8 @@ export const AddLesson = () => {
       return;
     }
 
-    // يجب رفع الفيديو والحصول على GUID من Bunny قبل النشر
-    if (!bunnyGuid) {
+    // يجب رفع الفيديو والحصول على رابط صالح قبل النشر
+    if (!uploadedVideoUrl) {
       toast.error(language === 'ar' ? 'يرجى رفع فيديو الدرس أولاً' : 'Please upload the lesson video first');
       return;
     }
@@ -188,7 +188,7 @@ export const AddLesson = () => {
       const lessonId = await CourseService.addLessonToCourse(courseId!, {
         title: lessonData.title,
         description: lessonData.description,
-        videoUrl: bunnyGuid,
+        videoUrl: uploadedVideoUrl,
       });
       
       toast.success(language === 'ar' ? 'تم نشر الدرس بنجاح!' : 'Lesson published successfully!');
@@ -335,7 +335,7 @@ export const AddLesson = () => {
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => { setLessonData(prev => ({ ...prev, videoFile: null })); setBunnyGuid(null); setUploadProgress(0); }}
+                        onClick={() => { setLessonData(prev => ({ ...prev, videoFile: null })); setUploadedVideoUrl(null); setUploadProgress(0); }}
                         className="w-full"
                       >
                         {language === 'ar' ? 'تغيير الفيديو' : 'Change Video'}
@@ -350,7 +350,7 @@ export const AddLesson = () => {
             <div className="mt-8 flex justify-end">
               <Button
                 onClick={handlePublishLesson}
-                disabled={isPublishing || !lessonData.title || !lessonData.description || !bunnyGuid}
+                disabled={isPublishing || !lessonData.title || !lessonData.description || !uploadedVideoUrl}
                 className="bg-[#2c4656] hover:bg-[#1e3240] text-white px-8 py-2 flex items-center gap-2"
               >
                 {isPublishing ? (
@@ -377,11 +377,11 @@ export const AddLesson = () => {
                   </p>
                   <p>
                     {language === 'ar' 
-                      ? 'حالياً، نشر الدروس وهمي حتى يتم ربط النظام بـ Bunny.net لتخزين الفيديوهات. سيتم تفعيل الرفع الحقيقي قريباً.'
-                      : 'Currently, lesson publishing is simulated until the system is integrated with Bunny.net for video storage. Real uploading will be activated soon.'
+                      ? 'تم تمكين رفع الفيديو إلى مخزن خارجي متوافق مع S3. سيتم عرض الفيديو مباشرة عبر الرابط المرفوع.'
+                      : 'Video upload to an external S3-compatible storage is enabled. Videos will play directly from the uploaded URL.'
                     }
                   </p>
-                </div>
+              </div>
               </div>
             </div>
           </div>

@@ -1,7 +1,9 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -9,7 +11,7 @@ import { useLanguage } from "@/contexts/LanguageContext";
 import { useAuth } from "@/hooks/useAuth";
 import { auth, db } from "@/firebase/config";
 import { sendEmailVerification, onAuthStateChanged } from "firebase/auth";
-import { doc, getDoc, updateDoc, setDoc, collection, query, where, getDocs, deleteDoc } from "firebase/firestore";
+import { doc, getDoc, updateDoc, setDoc, collection, query, where, getDocs, deleteDoc, onSnapshot, orderBy, addDoc, serverTimestamp } from "firebase/firestore";
 import { toast } from 'sonner';
 import DashboardHeader from "@/components/DashboardHeader";
 import TeacherSidebar from "@/components/TeacherSidebar";
@@ -34,6 +36,7 @@ import {
   Copy,
   RefreshCw
 } from "lucide-react";
+import { Check, UploadCloud } from "lucide-react";
 
 interface Course {
   id: string;
@@ -63,9 +66,501 @@ interface Notification {
 export const TeacherDashboard = () => {
   const { language, t } = useLanguage();
   const { user } = useAuth();
+  const isArabic = language === 'ar';
+  
+  // Teacher Pricing Plans loaded from Firestore
+  interface PricingPlanDoc {
+    id?: string;
+    name: string;
+    period?: string; // e.g. "/month"
+    features?: string[];
+    popular?: boolean;
+    // price sources (one of these should exist)
+    priceUsd?: number;
+    priceUSD?: number;
+    prices?: { USD?: number; EGP?: number; JOD?: number };
+    price?: number;
+    currency?: 'USD' | 'EGP' | 'JOD';
+    order?: number;
+  }
+
+  const [plans, setPlans] = useState<PricingPlanDoc[]>([]);
+
+  // Helper to smooth-scroll to pricing section when hash is #pricing
+  const scrollToPricing = () => {
+    if (window.location.hash === '#pricing') {
+      const el = document.getElementById('pricing');
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }
+  };
+
+  // Attempt scroll on mount and shortly after (in case of async content)
+  useEffect(() => {
+    scrollToPricing();
+    const t = setTimeout(scrollToPricing, 300);
+    return () => clearTimeout(t);
+  }, []);
+
+  // Re-attempt scroll after pricing plans render/update
+  useEffect(() => {
+    scrollToPricing();
+  }, [plans.length]);
+
+  // React to hash changes to ensure scroll even when already on dashboard
+  useEffect(() => {
+    const onHashChange = () => scrollToPricing();
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
+
+  // Subscription section state
+  const [selectedPlan, setSelectedPlan] = useState<PricingPlanDoc | null>(null);
+  const [showSubscription, setShowSubscription] = useState(false);
+  const [walletNumber, setWalletNumber] = useState('');
+  const [receiptFile, setReceiptFile] = useState<File | null>(null);
+  const [receiptError, setReceiptError] = useState('');
+  const [isReceiptValid, setIsReceiptValid] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showSuccessMessage, setShowSuccessMessage] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [receiptPreview, setReceiptPreview] = useState<string | null>(null);
+  const [pendingPlanId, setPendingPlanId] = useState<string | null>(null);
+  const [rejectedPlanId, setRejectedPlanId] = useState<string | null>(null);
+  const [rejectionVisibleUntil, setRejectionVisibleUntil] = useState<number | null>(null);
+  const subscriptionSectionRef = useRef<HTMLDivElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const rejectionTimeoutRef = useRef<number | null>(null);
+
+  // Currency handling (listening to admin settings)
+  const [currency, setCurrency] = useState<'USD' | 'EGP' | 'JOD'>('USD');
+  const [adminWalletInitialized, setAdminWalletInitialized] = useState(false);
+
+  useEffect(() => {
+    // Subscribe to app currency from Firestore
+    const unsub = onSnapshot(doc(db, 'settings', 'payment'), (snap) => {
+      const data = snap.data() as any;
+      const cur = data?.currency;
+      if (cur === 'USD' || cur === 'EGP' || cur === 'JOD') {
+        setCurrency(cur);
+      }
+      // Read admin wallet number from settings/payment and populate walletNumber as read-only
+      const adminWallet = typeof data?.adminWalletNumber === 'string' ? data.adminWalletNumber : '';
+      if (adminWallet && !adminWalletInitialized) {
+        setWalletNumber(adminWallet);
+        setAdminWalletInitialized(true);
+      }
+    }, (error) => {
+      console.error('Failed to subscribe to app currency:', error);
+    });
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
+    // Subscribe to pricing plans for real-time updates
+    let unsubscribe: any = null;
+    // Initial one-time fetch to ensure plans render even if streaming is blocked
+    try {
+      getDocs(collection(db, 'pricingPlans')).then((onceSnap) => {
+        const onceData: PricingPlanDoc[] = onceSnap.docs.map((docSnap) => {
+          const d = docSnap.data() as any;
+          const features = Array.isArray(d.features) ? d.features : [];
+          const period = typeof d.period === 'string' ? d.period : '';
+          const popular = !!d.popular;
+          const order = typeof d.order === 'number' ? d.order : undefined;
+          const priceUSD = typeof d.priceUSD === 'number'
+            ? d.priceUSD
+            : (typeof d.priceUsd === 'number' ? d.priceUsd
+              : (typeof d.price === 'number' && d.currency === 'USD' ? d.price : undefined));
+          return {
+            id: docSnap.id,
+            name: d.name || (isArabic ? 'باقة بدون اسم' : 'Unnamed Plan'),
+            features,
+            period,
+            popular,
+            order,
+            priceUSD,
+            prices: d.prices,
+            price: d.price,
+            currency: d.currency,
+          } as PricingPlanDoc;
+        });
+        setPlans(onceData);
+        console.log('[PricingPlans] initial one-time fetch count:', onceData.length);
+      }).catch((e) => {
+        console.error('Initial one-time fetch for pricingPlans failed:', e);
+      });
+    } catch (initErr) {
+      console.error('Failed to start initial fetch for pricingPlans:', initErr);
+    }
+    const setupSubscription = () => {
+      try {
+        const q = query(collection(db, 'pricingPlans'), orderBy('order', 'asc'));
+        unsubscribe = onSnapshot(q, (snap) => {
+          const data: PricingPlanDoc[] = snap.docs.map((docSnap) => {
+            const d = docSnap.data() as any;
+            // Normalize fields and provide safe defaults to avoid runtime errors
+            const features = Array.isArray(d.features) ? d.features : [];
+            const period = typeof d.period === 'string' ? d.period : '';
+            const popular = !!d.popular;
+            const order = typeof d.order === 'number' ? d.order : undefined;
+            const priceUSD = typeof d.priceUSD === 'number'
+              ? d.priceUSD
+              : (typeof d.priceUsd === 'number' ? d.priceUsd
+                : (typeof d.price === 'number' && d.currency === 'USD' ? d.price : undefined));
+            return {
+              id: docSnap.id,
+              name: d.name || (isArabic ? 'باقة بدون اسم' : 'Unnamed Plan'),
+              features,
+              period,
+              popular,
+              order,
+              priceUSD,
+              prices: d.prices,
+              price: d.price,
+              currency: d.currency,
+            } as PricingPlanDoc;
+          });
+          setPlans(data);
+          // If snapshot returns zero plans, perform a one-time fetch to double-check
+          if (data.length === 0) {
+            getDocs(collection(db, 'pricingPlans')).then((onceSnap) => {
+              const onceData: PricingPlanDoc[] = onceSnap.docs.map((docSnap) => {
+                const d = docSnap.data() as any;
+                const features = Array.isArray(d.features) ? d.features : [];
+                const period = typeof d.period === 'string' ? d.period : '';
+                const popular = !!d.popular;
+                const order = typeof d.order === 'number' ? d.order : undefined;
+                const priceUSD = typeof d.priceUSD === 'number'
+                  ? d.priceUSD
+                  : (typeof d.priceUsd === 'number' ? d.priceUsd
+                    : (typeof d.price === 'number' && d.currency === 'USD' ? d.price : undefined));
+                return {
+                  id: docSnap.id,
+                  name: d.name || (isArabic ? 'باقة بدون اسم' : 'Unnamed Plan'),
+                  features,
+                  period,
+                  popular,
+                  order,
+                  priceUSD,
+                  prices: d.prices,
+                  price: d.price,
+                  currency: d.currency,
+                } as PricingPlanDoc;
+              });
+              setPlans(onceData);
+              console.log('[PricingPlans] one-time fetch count:', onceData.length);
+            }).catch((e) => {
+              console.error('Failed one-time fetch for pricingPlans:', e);
+            });
+          } else {
+            console.log('[PricingPlans] live count:', data.length);
+          }
+        }, (error) => {
+          console.error('Failed to subscribe to pricing plans (ordered):', error);
+          // Fallback to unordered subscription if ordering fails for any reason
+          try {
+            unsubscribe = onSnapshot(collection(db, 'pricingPlans'), (snap2) => {
+              const data2: PricingPlanDoc[] = snap2.docs.map((docSnap) => {
+                const d = docSnap.data() as any;
+                const features = Array.isArray(d.features) ? d.features : [];
+                return { id: docSnap.id, name: d.name || (isArabic ? 'باقة بدون اسم' : 'Unnamed Plan'), features, period: d.period || '', popular: !!d.popular, prices: d.prices, priceUSD: d.priceUSD, price: d.price, currency: d.currency } as PricingPlanDoc;
+              });
+              setPlans(data2);
+              console.log('[PricingPlans] fallback live count:', data2.length);
+            });
+          } catch (fallbackError) {
+            console.error('Failed to subscribe to pricing plans (fallback):', fallbackError);
+          }
+        });
+      } catch (err) {
+        console.error('Failed to initialize pricing plans subscription:', err);
+        try {
+          unsubscribe = onSnapshot(collection(db, 'pricingPlans'), (snap2) => {
+            const data2: PricingPlanDoc[] = snap2.docs.map((docSnap) => {
+              const d = docSnap.data() as any;
+              const features = Array.isArray(d.features) ? d.features : [];
+              return { id: docSnap.id, name: d.name || (isArabic ? 'باقة بدون اسم' : 'Unnamed Plan'), features, period: d.period || '', popular: !!d.popular, prices: d.prices, priceUSD: d.priceUSD, price: d.price, currency: d.currency } as PricingPlanDoc;
+            });
+            setPlans(data2);
+            console.log('[PricingPlans] final fallback live count:', data2.length);
+          });
+        } catch (finalError) {
+          console.error('Failed to set pricing plans fallback subscription:', finalError);
+        }
+      }
+    };
+    setupSubscription();
+
+    return () => {
+      if (typeof unsubscribe === 'function') {
+        try { unsubscribe(); } catch {}
+      }
+    };
+  }, []);
+
+  const currencyMeta: Record<'USD' | 'EGP' | 'JOD', { symbol: string; rate: number }> = {
+    USD: { symbol: '$', rate: 1 },
+    EGP: { symbol: 'EGP ', rate: 49 },
+    JOD: { symbol: 'JOD ', rate: 0.71 },
+  };
+
+  const formatPlanPrice = (plan: PricingPlanDoc) => {
+    // If plan provides per-currency prices, use them
+    if (plan.prices && typeof plan.prices[currency] === 'number') {
+      const meta = currencyMeta[currency];
+      return `${meta.symbol}${(plan.prices[currency] as number).toFixed(2)}`;
+    }
+    // If plan has a direct price with currency, use it when matching
+    if (typeof plan.price === 'number' && plan.currency === currency) {
+      const meta = currencyMeta[currency];
+      return `${meta.symbol}${plan.price.toFixed(2)}`;
+    }
+    // Otherwise fallback to USD source and convert
+    const usd = typeof plan.priceUsd === 'number' ? plan.priceUsd
+      : typeof plan.priceUSD === 'number' ? plan.priceUSD
+      : (typeof plan.price === 'number' && plan.currency === 'USD') ? plan.price
+      : undefined;
+    if (typeof usd === 'number') {
+      const meta = currencyMeta[currency];
+      const converted = usd * meta.rate;
+      return `${meta.symbol}${converted.toFixed(2)}`;
+    }
+    // Final fallback: show unknown price
+    return isArabic ? 'غير متاح' : 'N/A';
+  };
+
+  // Helper to compute numeric price in current currency
+  const getPlanNumericPrice = (plan: PricingPlanDoc): number | null => {
+    if (plan.prices && typeof plan.prices[currency] === 'number') {
+      return plan.prices[currency] as number;
+    }
+    if (typeof plan.price === 'number' && plan.currency === currency) {
+      return plan.price;
+    }
+    const usd = typeof plan.priceUsd === 'number' ? plan.priceUsd
+      : typeof plan.priceUSD === 'number' ? plan.priceUSD
+      : (typeof plan.price === 'number' && plan.currency === 'USD') ? plan.price
+      : undefined;
+    if (typeof usd === 'number') {
+      return usd * currencyMeta[currency].rate;
+    }
+    return null;
+  };
+
+  // Process receipt file (image or PDF). Images are compressed to ~800KB; PDFs are accepted
+  // directly if under ~800KB. Converts to base64 Data URL for storage in a Firestore document.
+  const processReceiptFile = async (file: File): Promise<string> => {
+    const targetMaxBytes = 800 * 1024; // ~800KB to stay well within Firestore doc limit when base64-encoded
+
+    if (file.type.startsWith('image/')) {
+      const imageBitmap = await createImageBitmap(file);
+      const maxDims = [
+        { w: 1920, h: 1080 },
+        { w: 1600, h: 900 },
+        { w: 1280, h: 720 },
+        { w: 960, h: 540 },
+        { w: 800, h: 450 }
+      ];
+      const qualities = [0.8, 0.7, 0.6, 0.5, 0.45, 0.4];
+
+      const aspect = imageBitmap.width / imageBitmap.height;
+      let lastDataUrl: string | null = null;
+
+      for (const dims of maxDims) {
+        const targetW = Math.min(dims.w, imageBitmap.width);
+        const targetH = Math.min(dims.h, Math.round(targetW / aspect));
+        const canvas = document.createElement('canvas');
+        canvas.width = targetW;
+        canvas.height = targetH;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) throw new Error(isArabic ? 'تعذر معالجة الصورة.' : 'Unable to process image.');
+        ctx.drawImage(imageBitmap, 0, 0, targetW, targetH);
+        for (const q of qualities) {
+          const blob: Blob = await new Promise((resolve) => canvas.toBlob((b) => resolve(b as Blob), 'image/jpeg', q));
+          if (!blob) continue;
+          if (blob.size <= targetMaxBytes) {
+            const dataUrl: string = await new Promise((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onload = () => resolve(reader.result as string);
+              reader.onerror = reject;
+              reader.readAsDataURL(blob);
+            });
+            return dataUrl;
+          }
+          // Keep last dataUrl candidate in case all attempts exceed size
+          lastDataUrl = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result as string);
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          });
+        }
+      }
+      if (lastDataUrl) return lastDataUrl;
+      throw new Error(isArabic ? 'تعذر ضغط الصورة إلى حجم مناسب.' : 'Unable to compress image to an acceptable size.');
+    }
+
+    if (file.type === 'application/pdf') {
+      if (file.size > targetMaxBytes) {
+        throw new Error(
+          isArabic
+            ? 'ملف PDF كبير. يرجى رفع ملف أصغر أو صورة.'
+            : 'PDF file is too large. Please upload a smaller file or an image.'
+        );
+      }
+      const dataUrl: string = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      return dataUrl;
+    }
+
+    throw new Error(
+      isArabic
+        ? 'نوع ملف الإيصال غير مدعوم. يسمح بالصور أو PDF.'
+        : 'Unsupported receipt file type. Only images or PDF are allowed.'
+    );
+  };
+
+  const openSubscription = (plan: typeof plans[number]) => {
+    setSelectedPlan(plan);
+    setShowSubscription(true);
+    // Use setTimeout to ensure section is rendered before scrolling
+    setTimeout(() => {
+      const node = subscriptionSectionRef.current;
+      if (node && typeof node.scrollIntoView === 'function') {
+        node.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      } else if (node) {
+        window.scrollTo({ top: (node as any).offsetTop - 24, behavior: 'smooth' });
+      }
+    }, 100);
+  };
+
+  const handleCompleteSubscription = async () => {
+    if (!selectedPlan) return;
+    if (!walletNumber || walletNumber.trim().length < 6) {
+      toast.error(isArabic ? 'يرجى التأكد من رقم المحفظة.' : 'Please verify the wallet number.');
+      return;
+    }
+    if (!receiptFile) {
+      toast.error(isArabic ? 'يرجى رفع إيصال الدفع أولاً.' : 'Please upload the payment receipt first.');
+      return;
+    }
+    if (!isReceiptValid) {
+      toast.error(isArabic ? 'الإيصال غير صالح، يرجى اختيار صورة بصيغة JPEG/PNG.' : 'Receipt is invalid. Please select a JPEG/PNG image.');
+      return;
+    }
+    try {
+      setShowSuccessMessage(false);
+      setIsSubmitting(true);
+      setUploadProgress(15);
+      const receiptBase64 = await processReceiptFile(receiptFile);
+      setUploadProgress(60);
+      const amount = getPlanNumericPrice(selectedPlan);
+      if (amount === null) {
+        throw new Error(isArabic ? 'تعذر تحديد سعر الباقة المختارة.' : 'Unable to determine selected plan price.');
+      }
+      const teacherId = user?.uid || (user as any)?.id || 'unknown';
+      const teacherName = (user?.profile?.fullName || user?.displayName || 'unknown') as string;
+      const paymentDoc = {
+        teacherId,
+        teacherName,
+        planId: selectedPlan.id || null,
+        planName: selectedPlan.name,
+        period: selectedPlan.period || '',
+        amount,
+        currency,
+        walletNumber,
+        receiptBase64,
+        status: 'pending',
+        createdAt: serverTimestamp(),
+      };
+      await addDoc(collection(db, 'payments'), paymentDoc);
+      setUploadProgress(100);
+      setShowSuccessMessage(true);
+      setPendingPlanId(selectedPlan.id || null);
+      setShowSubscription(false);
+
+      setReceiptFile(null);
+      setIsReceiptValid(false);
+      setReceiptError('');
+      if (receiptPreview) {
+        try { URL.revokeObjectURL(receiptPreview); } catch {}
+        setReceiptPreview(null);
+      }
+      setTimeout(() => setUploadProgress(0), 800);
+    } catch (err: any) {
+      console.error('Complete subscription error:', err);
+      const msg = err?.message || '';
+      toast.error(
+        isArabic
+          ? `حدث خطأ أثناء تأكيد الدفع. حاول مرة أخرى. ${msg ? '(' + msg + ')' : ''}`
+          : `An error occurred while confirming payment. Try again. ${msg ? '(' + msg + ')' : ''}`
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const validateReceipt = (file: File) => {
+    const allowedTypes = ['image/jpeg', 'image/png', 'application/pdf'];
+    const maxSizeMB = 10;
+    const isTypeOk = allowedTypes.includes(file.type);
+    const isSizeOk = file.size <= maxSizeMB * 1024 * 1024;
+    if (!isTypeOk) {
+      setReceiptError(isArabic ? 'نوع الملف غير مدعوم. يسمح بالصورة (JPEG/PNG) أو PDF.' : 'Unsupported file type. Allowed: JPEG/PNG image or PDF.');
+      setIsReceiptValid(false);
+      return false;
+    }
+    if (!isSizeOk) {
+      setReceiptError(isArabic ? `حجم الملف يتجاوز ${maxSizeMB} ميجابايت.` : `File size exceeds ${maxSizeMB} MB.`);
+      setIsReceiptValid(false);
+      return false;
+    }
+    setReceiptError('');
+    setIsReceiptValid(true);
+    return true;
+  };
+
+  const handleReceiptChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] || null;
+    setReceiptFile(file);
+    if (file && file.type.startsWith('image/')) {
+      try {
+        const url = URL.createObjectURL(file);
+        setReceiptPreview(url);
+      } catch {
+        setReceiptPreview(null);
+      }
+    } else {
+      if (receiptPreview) {
+        try { URL.revokeObjectURL(receiptPreview); } catch {}
+      }
+      setReceiptPreview(null);
+    }
+    if (file) validateReceipt(file);
+    else {
+      setIsReceiptValid(false);
+      setReceiptError(isArabic ? 'لم يتم اختيار ملف.' : 'No file selected.');
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      if (receiptPreview) {
+        try { URL.revokeObjectURL(receiptPreview); } catch {}
+      }
+    };
+  }, [receiptPreview]);
   
   // Empty state for new teachers - all data will come from backend later
   const teacherName = user?.profile?.fullName || user?.displayName || (language === 'ar' ? 'مدرس جديد' : 'New Teacher');
+  const [teacherProfile, setTeacherProfile] = useState<any>(null);
+  const displayTeacherName = teacherProfile?.fullName || teacherName;
   
   // Email verification state
   const [showEmailVerification, setShowEmailVerification] = useState(true);
@@ -79,7 +574,7 @@ export const TeacherDashboard = () => {
   const [linkedStudents, setLinkedStudents] = useState<any[]>([]);
   const [registeredStudents, setRegisteredStudents] = useState<StudentProfile[]>([]);
   const [isLoadingStudents, setIsLoadingStudents] = useState(true);
-  const [teacherProfile, setTeacherProfile] = useState<any>(null);
+  // moved teacherProfile above to compute displayTeacherName
   // إدارة كود الدعوة المخصص
   const [invitationCode, setInvitationCode] = useState<string>('');
   const [isLoadingCode, setIsLoadingCode] = useState<boolean>(true);
@@ -93,6 +588,9 @@ export const TeacherDashboard = () => {
     monthlyEarnings: 0,
     totalEarnings: 0
   });
+
+  // حالة موافقة الاشتراك من قبل الإدارة
+  const [isSubscriptionApproved, setIsSubscriptionApproved] = useState<boolean>(false);
 
   // تحديث الإحصائيات عند تغيير الدورات
   useEffect(() => {
@@ -109,14 +607,98 @@ export const TeacherDashboard = () => {
     }
   }, [courses]);
 
-  // جلب دورات المدرس
+  // حساب معرف المدرس الفعّال للمستخدم (يدعم حسابات المساعد عبر proxyOf)
+  const [effectiveTeacherId, setEffectiveTeacherId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const resolveEffectiveTeacher = async () => {
+      if (!user?.uid) return;
+      try {
+        const profile = await TeacherService.getTeacherByUid(user.uid);
+        const effId = profile?.id || user.uid;
+        setEffectiveTeacherId(effId);
+      } catch (e) {
+        setEffectiveTeacherId(user.uid);
+      }
+    };
+    resolveEffectiveTeacher();
+  }, [user?.uid]);
+
+  // الاستماع لوثائق المدفوعات لهذا المدرس لمزامنة حالات الاشتراك: pending/approved/rejected بشكل فوري ومستمر
+  useEffect(() => {
+    if (!effectiveTeacherId) return;
+    try {
+      const q = query(
+        collection(db, 'payments'),
+        where('teacherId', '==', effectiveTeacherId)
+      );
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        let hasApproved = false;
+        let pendingForPlan: string | null = null;
+        let hasRejected = false;
+        let rejectedForPlan: string | null = null;
+        snapshot.forEach((docSnap) => {
+          const d = docSnap.data() as any;
+          const st = d?.status;
+          if (st === 'approved') hasApproved = true;
+          else if (st === 'pending') pendingForPlan = typeof d?.planId === 'string' ? d.planId : pendingForPlan;
+          else if (st === 'rejected') {
+            hasRejected = true;
+            rejectedForPlan = typeof d?.planId === 'string' ? d.planId : rejectedForPlan;
+          }
+        });
+
+        if (hasApproved) {
+          setIsSubscriptionApproved(true);
+          try { localStorage.setItem('isSubscriptionApproved', 'true'); } catch {}
+          setPendingPlanId(null);
+          // clear any rejection banner
+          setRejectedPlanId(null);
+          setRejectionVisibleUntil(null);
+          if (rejectionTimeoutRef.current) { try { clearTimeout(rejectionTimeoutRef.current); } catch {} rejectionTimeoutRef.current = null; }
+        } else if (pendingForPlan) {
+          setIsSubscriptionApproved(false);
+          try { localStorage.setItem('isSubscriptionApproved', 'false'); } catch {}
+          setPendingPlanId(pendingForPlan);
+          // clear any rejection banner when new pending is present
+          setRejectedPlanId(null);
+          setRejectionVisibleUntil(null);
+          if (rejectionTimeoutRef.current) { try { clearTimeout(rejectionTimeoutRef.current); } catch {} rejectionTimeoutRef.current = null; }
+        } else if (hasRejected && rejectedForPlan) {
+          setIsSubscriptionApproved(false);
+          try { localStorage.setItem('isSubscriptionApproved', 'false'); } catch {}
+          setPendingPlanId(null); // enable buttons again
+          setRejectedPlanId(rejectedForPlan);
+          const expiresAt = Date.now() + 5 * 60 * 1000;
+          setRejectionVisibleUntil(expiresAt);
+          if (rejectionTimeoutRef.current) { try { clearTimeout(rejectionTimeoutRef.current); } catch {} }
+          rejectionTimeoutRef.current = window.setTimeout(() => {
+            setRejectedPlanId(null);
+            setRejectionVisibleUntil(null);
+            rejectionTimeoutRef.current = null;
+          }, 5 * 60 * 1000);
+        } else {
+          // Preserve existing pending state to avoid race conditions right after upload
+          // Do not force-clear pendingPlanId when no payment docs are observed yet
+          setIsSubscriptionApproved(false);
+          try { localStorage.setItem('isSubscriptionApproved', 'false'); } catch {}
+        }
+      }, (error) => {
+        console.error('Subscription status listener error:', error);
+      });
+      return () => unsubscribe();
+    } catch (err) {
+      console.error('Failed to subscribe to teacher payments:', err);
+    }
+  }, [effectiveTeacherId]);
+
+  // جلب دورات المدرس باستخدام المعرف الفعّال
   useEffect(() => {
     const fetchCourses = async () => {
-      if (!user?.uid) return;
-      
+      if (!effectiveTeacherId) return;
       try {
         setIsLoadingCourses(true);
-        const instructorCourses = await CourseService.getInstructorCourses(user.uid);
+        const instructorCourses = await CourseService.getInstructorCourses(effectiveTeacherId);
         setCourses(instructorCourses);
       } catch (error) {
         console.error('خطأ في جلب الدورات:', error);
@@ -124,37 +706,33 @@ export const TeacherDashboard = () => {
         setIsLoadingCourses(false);
       }
     };
-
     fetchCourses();
-  }, [user?.uid]);
+  }, [effectiveTeacherId]);
 
   // جلب الطلاب المرتبطين والمسجلين
   useEffect(() => {
     const fetchTeacherData = async () => {
       if (!user?.uid) return;
-      
       try {
         setIsLoadingStudents(true);
-        
-        // جلب أو إنشاء ملف تعريف المدرس
-        let teacherProfile = await TeacherService.getTeacherByUid(user.uid);
-        if (!teacherProfile) {
-          teacherProfile = await TeacherService.createTeacherProfile(
+        // جلب ملف تعريف المدرس (يراعي proxyOf)
+        let profile = await TeacherService.getTeacherByUid(user.uid);
+        if (!profile) {
+          profile = await TeacherService.createTeacherProfile(
             user.uid,
             teacherName,
             user.email || ''
           );
         }
-        
-        if (teacherProfile) {
-          setTeacherProfile(teacherProfile);
-          
+        if (profile) {
+          setTeacherProfile(profile);
+          const effId = profile.id || user.uid;
+          setEffectiveTeacherId(effId);
           // جلب الطلاب المرتبطين (للإحصائيات)
-          const students = await TeacherService.getStudentsForTeacher(user.uid);
+          const students = await TeacherService.getStudentsForTeacher(effId);
           setLinkedStudents(students);
-          
           // جلب الطلاب المسجلين مع التفاصيل الكاملة
-          const registeredStudentsData = await StudentService.getStudentsByTeacher(user.uid);
+          const registeredStudentsData = await StudentService.getStudentsByTeacher(effId);
           setRegisteredStudents(registeredStudentsData);
         }
       } catch (error) {
@@ -193,7 +771,7 @@ export const TeacherDashboard = () => {
   // نسخ رابط الدعوة
   const copyInviteLink = async () => {
     try {
-      const inviteLink = `${window.location.origin}/invite/${user?.uid}`;
+      const inviteLink = `${window.location.origin}/invite/${effectiveTeacherId || user?.uid}`;
       await navigator.clipboard.writeText(inviteLink);
       toast.success(language === 'ar' ? 'تم نسخ الرابط بنجاح!' : 'Link copied successfully!');
     } catch (error) {
@@ -280,7 +858,8 @@ export const TeacherDashboard = () => {
         
         if (userDoc.exists()) {
           const userData = userDoc.data();
-          if (userData.emailVerified) {
+          // If this account is an assistant (has proxyOf), do not suppress UI based on Firestore flag
+          if (userData.emailVerified && !userData.proxyOf) {
             setIsEmailVerified(true);
             setShowEmailVerification(false);
           }
@@ -322,9 +901,9 @@ export const TeacherDashboard = () => {
 
   // تحميل كود الدعوة الحالي أو إنشاؤه للمدرس
   const loadInvitationCode = async () => {
-    if (!user?.uid) return;
+    if (!effectiveTeacherId) return;
     try {
-      const userDocRef = doc(db, 'teachers', user.uid);
+      const userDocRef = doc(db, 'teachers', effectiveTeacherId);
       const userDoc = await getDoc(userDocRef);
       if (userDoc.exists()) {
         const userData = userDoc.data();
@@ -336,7 +915,7 @@ export const TeacherDashboard = () => {
           await updateDoc(userDocRef, { invitationCode: newCode });
           await setDoc(doc(db, 'invitationCodes', newCode), {
             code: newCode,
-            teacherId: user.uid,
+            teacherId: effectiveTeacherId,
             teacherName: user.displayName || user.email,
             createdAt: new Date()
           });
@@ -351,13 +930,14 @@ export const TeacherDashboard = () => {
   };
 
   useEffect(() => {
-    if (!user?.uid) return;
+    if (!effectiveTeacherId) return;
     loadInvitationCode();
-  }, [user?.uid]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [effectiveTeacherId]);
 
   // حفظ كود مخصص واستبدال القديم
   const saveCustomCode = async () => {
-    if (!user?.uid || !customCode.trim()) return;
+    if (!effectiveTeacherId || !customCode.trim()) return;
     const codeRegex = /^[A-Z0-9]{6}$/;
     const upperCode = customCode.toUpperCase();
     if (!codeRegex.test(upperCode)) {
@@ -373,7 +953,7 @@ export const TeacherDashboard = () => {
       const querySnapshot = await getDocs(codesQuery);
       if (!querySnapshot.empty) {
         const existingDoc = querySnapshot.docs[0];
-        if (existingDoc.data().teacherId !== user.uid) {
+        if (existingDoc.data().teacherId !== effectiveTeacherId) {
           toast.error(language === 'ar' ? 'هذا الرمز مستخدم بالفعل' : 'This code is already taken');
           return;
         }
@@ -384,12 +964,12 @@ export const TeacherDashboard = () => {
         await deleteDoc(oldCodeDoc);
       }
       // حفظ الكود الجديد في مستند المدرس ومجموعة الأكواد
-      const userDocRef = doc(db, 'teachers', user.uid);
+      const userDocRef = doc(db, 'teachers', effectiveTeacherId);
       await updateDoc(userDocRef, { invitationCode: upperCode });
       await setDoc(doc(db, 'invitationCodes', upperCode), {
         code: upperCode,
-        teacherId: user.uid,
-        teacherName: user.displayName || user.email,
+        teacherId: effectiveTeacherId,
+        teacherName: user?.displayName || user?.email,
         createdAt: new Date()
       });
       setInvitationCode(upperCode);
@@ -445,61 +1025,42 @@ export const TeacherDashboard = () => {
 
   return (
     <div className="min-h-screen bg-background" dir={language === 'ar' ? 'rtl' : 'ltr'}>
-      <DashboardHeader studentName={teacherName} notificationCount={0} />
+      <DashboardHeader studentName={displayTeacherName} notificationCount={0} />
       
       <div className="flex min-h-[calc(100vh-4rem)]">
-        <TeacherSidebar />
+        <TeacherSidebar isSubscriptionApproved={isSubscriptionApproved} />
         
         {/* Main Content */}
         <main className="flex-1 p-6 overflow-auto">
-          {/* Welcome Section */}
-          <div className="mb-8">
-            <h1 className="text-3xl font-bold text-foreground mb-2">
-              {language === 'ar' ? 'مرحباً' : 'Welcome'}, {teacherName}
+          {/* Welcome Section (moved above pricing, centered) */}
+          <div className="mb-8 text-center">
+            <h1 className="text-3xl md:text-4xl font-bold text-foreground mb-2">
+              {language === 'ar' ? 'مرحباً' : 'Welcome'}, {displayTeacherName}
             </h1>
-            <p className="text-muted-foreground">
+            <p className="text-lg md:text-xl text-muted-foreground">
               {language === 'ar' 
-                ? 'ابدأ رحلتك التعليمية وشارف معرفتك مع الطلاب حول العالم'
+                ? 'ابدأ رحلتك التعليمية وشارك معرفتك مع الطلاب حول العالم'
                 : 'Start your teaching journey and share your knowledge with students worldwide'
               }
             </p>
           </div>
 
-          {/* Email Verification Alert */}
-          {showEmailVerification && !isEmailVerified && (
-            <Alert className="mb-6 border-orange-200 bg-orange-50 dark:border-orange-800 dark:bg-orange-950">
-              <AlertTriangle className="h-4 w-4 text-orange-600 dark:text-orange-400" />
-              <AlertDescription className="flex items-center justify-between">
-                <span className="text-orange-800 dark:text-orange-200">
-                  {language === 'ar' 
-                    ? 'نرجو تنشيط بريدك الإلكتروني لمنع تعطيل حسابك في المستقبل.'
-                    : 'Please activate your email to prevent account suspension in the future.'
-                  }
-                </span>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleSendVerificationEmail}
-                  disabled={isSendingEmail}
-                  className="ml-4 border-orange-300 text-orange-700 hover:bg-orange-100 dark:border-orange-700 dark:text-orange-300 dark:hover:bg-orange-900"
-                >
-                  {isSendingEmail ? (
-                    <>
-                      <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-orange-600 mr-2"></div>
-                      {language === 'ar' ? 'جاري الإرسال...' : 'Sending...'}
-                    </>
-                  ) : (
-                    <>
-                      <Mail className="h-3 w-3 mr-2" />
-                      {language === 'ar' ? 'إرسال تأكيد البريد' : 'Send Email Confirmation'}
-                    </>
-                  )}
-                </Button>
-              </AlertDescription>
-            </Alert>
-          )}
+          
+
+          {/* Subscription Section (moved below pricing) */}
+          {/* The details card renders after pricing plans for clearer flow */}
+          {/* Note: openSubscription() scrolls to this ref when a plan is selected */}
+          {/* Keep this conditional to only show after selection */}
+          
+          
+          {/* Registered Students Section (correct version below pricing) */}
+
+          {/* Welcome Section moved above pricing */}
+
+          {/* Email Verification Alert disabled: verification is enforced via route guard */}
 
           {/* Stats Cards */}
+          {isSubscriptionApproved && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -548,8 +1109,9 @@ export const TeacherDashboard = () => {
 
             {/* تمت إزالة بطاقتي الأرباح الشهرية وإجمالي الأرباح */}
           </div>
+          )}
 
-          {/* Invitation Link Section */}
+          {/* Invitation Link Section (visible before subscription) */}
           <Card className="mb-6">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -562,7 +1124,7 @@ export const TeacherDashboard = () => {
                 <div className="flex items-center gap-3 p-4 bg-gray-50 rounded-lg">
                   <div className="flex-1">
                     <div className="text-sm font-mono text-[#2c4656] break-all bg-white p-3 rounded border">
-                      {`${window.location.origin}/invite/${user?.uid || 'teacher-id'}`}
+                      {`${window.location.origin}/invite/${effectiveTeacherId || user?.uid || 'teacher-id'}`}
                     </div>
                     <p className="text-sm text-muted-foreground mt-2">
                       {language === 'ar' 
@@ -639,7 +1201,196 @@ export const TeacherDashboard = () => {
             </CardContent>
           </Card>
 
+          {/* Teacher Pricing Plans Section (moved below invitation link and welcome) */}
+          <div id="pricing" className="mb-8">
+            <div className="text-center mb-6">
+              {/* Removed pricing title as requested */}
+              <p className="text-2xl md:text-3xl font-bold text-foreground">
+                {t('pricingDescription')}
+              </p>
+            </div>
+            <div className="grid md:grid-cols-3 gap-6 items-stretch">
+              {plans.map((plan, index) => (
+                <Card key={index} className={`h-full flex flex-col border-2 ${plan.popular ? 'border-accent shadow-xl' : ''}`}>
+                  {plan.popular && (
+                    <div className="bg-accent text-accent-foreground text-center py-2 font-semibold rounded-t-lg">
+                      {t('mostPopular')}
+                    </div>
+                  )}
+                  <CardHeader>
+                    <CardTitle className="text-2xl">{plan.name}</CardTitle>
+                    <CardDescription>
+                      <span className="text-3xl font-bold text-foreground">{formatPlanPrice(plan)}</span>
+                      <span className="text-muted-foreground">{plan.period}</span>
+                    </CardDescription>
+                    {pendingPlanId === plan.id && (
+                      <div className="mt-2 p-2 rounded border bg-yellow-50 text-yellow-900">
+                        {isArabic ? (
+                          <div>
+                            <span className="font-semibold">تم تأكيد الاشتراك بانتظار التفعيل</span>
+                            <span className="block text-xs mt-1">إذا لم يتم التفعيل خلال دقائق يرجى التواصل مع <a href="https://wa.me/01129972098" target="_blank" rel="noopener noreferrer" className="underline text-[#2c4656]">الدعم الفني</a>.</span>
+                          </div>
+                        ) : (
+                          <div>
+                            <span className="font-semibold">Subscription confirmed, awaiting activation</span>
+                            <span className="block text-xs mt-1">If not activated within minutes, please contact <a href="https://wa.me/01129972098" target="_blank" rel="noopener noreferrer" className="underline text-[#2c4656]">Support</a>.</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {rejectedPlanId === plan.id && rejectionVisibleUntil && Date.now() < rejectionVisibleUntil && (
+                      <div className="mt-2 p-2 rounded border bg-red-50 text-red-900">
+                        {isArabic ? (
+                          <div>
+                            <span className="font-semibold">تم رفض الاشتراك في الباقة</span>
+                            <span className="block text-xs mt-1">يمكنك المحاولة مرة أخرى واختيار إحدى الباقات المتاحة.</span>
+                          </div>
+                        ) : (
+                          <div>
+                            <span className="font-semibold">Subscription was rejected</span>
+                            <span className="block text-xs mt-1">You can try again and choose one of the available plans.</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </CardHeader>
+                  <CardContent className="flex-1">
+                    <ul className="space-y-3">
+                      {plan.features.map((feature, fIndex) => (
+                        <li key={fIndex} className="flex items-start">
+                          <Check className="w-5 h-5 text-green-600 mr-2 mt-0.5 flex-shrink-0" />
+                          <span className="text-muted-foreground">{feature}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </CardContent>
+                  <CardFooter className="mt-auto">
+                    <Button 
+                      className={`w-full ${plan.popular ? 'bg-accent hover:bg-accent/90' : ''}`}
+                      variant={plan.popular ? 'default' : 'outline'}
+                      onClick={() => openSubscription(plan)}
+                      disabled={!!pendingPlanId}
+                      aria-disabled={!!pendingPlanId}
+                    >
+                      {pendingPlanId ? (isArabic ? 'بانتظار التفعيل' : 'Awaiting Activation') : t('getStarted')}
+                    </Button>
+                  </CardFooter>
+                </Card>
+              ))}
+          </div>
+          </div>
+
+          {/* Subscription Section (appears after selecting a plan) */}
+          {showSubscription && selectedPlan && (
+            <div ref={subscriptionSectionRef} className="mb-10 scroll-mt-24" aria-live="polite">
+              <Card className="border-2">
+                <CardHeader>
+                  <CardTitle>
+                    {isArabic ? 'تفاصيل الباقة المختارة' : 'Selected Plan Details'}
+                  </CardTitle>
+                  <CardDescription>
+                    <span className="font-semibold text-foreground mr-2">{selectedPlan.name}</span>
+                    <span className="text-muted-foreground">{formatPlanPrice(selectedPlan)}{selectedPlan.period}</span>
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid md:grid-cols-2 gap-6">
+                    {/* Selected plan features */}
+                    <div>
+                      <h4 className="text-sm font-medium mb-3">
+                        {isArabic ? 'ميزات الباقة' : 'Plan Features'}
+                      </h4>
+                      <ul className="space-y-3">
+                        {selectedPlan.features.map((feature: string, fIndex: number) => (
+                          <li key={fIndex} className="flex items-start">
+                            <Check className="w-5 h-5 text-green-600 mr-2 mt-0.5 flex-shrink-0" />
+                            <span className="text-muted-foreground">{feature}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                    {/* Wallet and receipt upload */}
+                    <div>
+                      <Label htmlFor="wallet" className="text-sm">
+                        {isArabic ? 'رقم المحفظة' : 'Wallet Number'}
+                      </Label>
+                      <Input
+                        id="wallet"
+                        value={walletNumber}
+                        readOnly
+                        placeholder={isArabic ? 'رقم المحفظة (يتم تحديده بواسطة الإدارة)' : 'Wallet number (set by admin)'}
+                        className="mt-2"
+                        inputMode="numeric"
+                        aria-readonly="true"
+                        aria-describedby="wallet-help"
+                      />
+                      <p id="wallet-help" className="text-xs text-muted-foreground mt-1">
+                        {isArabic
+                          ? 'للاشتراك، ادفع على رقم المحفظة هذا ثم ارفع إيصال الدفع، وسيتم تفعيل الباقة خلال دقائق.'
+                          : 'To subscribe, pay to this wallet number, upload the payment receipt, and your plan will be activated within minutes.'}
+                      </p>
+
+                      <div className="mt-4">
+                        <input
+                          ref={fileInputRef}
+                          type="file"
+                          accept="image/jpeg,image/png"
+                          onChange={handleReceiptChange}
+                          className="hidden"
+                        />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="w-full"
+                          onClick={() => fileInputRef.current?.click()}
+                        >
+                          <UploadCloud className="w-4 h-4 mr-2" />
+                          {isArabic ? 'إضافة إيصال الدفع' : 'Add Payment Receipt'}
+                        </Button>
+                        {receiptFile && (
+                          <div className="mt-3">
+                            <div className="text-sm text-muted-foreground mb-2">
+                              {isArabic ? 'معاينة الإيصال:' : 'Receipt preview:'}
+                            </div>
+                            {receiptPreview && receiptFile?.type?.startsWith('image/') ? (
+                              <img src={receiptPreview} alt="Receipt preview" className="max-h-64 rounded border" />
+                            ) : (
+                              <div className="text-xs text-muted-foreground">
+                                {isArabic ? 'تم اختيار ملف غير صورة (مثل PDF). لا توجد معاينة.' : 'A non-image file (e.g., PDF) was selected. No preview.'}
+                              </div>
+                            )}
+                            <div className="mt-2">
+                              <Progress value={uploadProgress} className="w-full" />
+                              <p className="text-xs text-muted-foreground mt-1">
+                                {isArabic ? `جاري الرفع: ${uploadProgress}%` : `Uploading: ${uploadProgress}%`}
+                              </p>
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-2">
+                          <Button 
+                            onClick={handleCompleteSubscription} 
+                            disabled={isSubmitting || !(isReceiptValid && walletNumber.trim().length >= 6)}
+                            aria-disabled={isSubmitting || !(isReceiptValid && walletNumber.trim().length >= 6)}
+                            className="bg-[#ee7b3d] hover:bg-[#ee7b3d]/90 text-white"
+                          >
+                            {isArabic ? 'رفع الإيصال وتفعيل الباقة' : 'Upload Receipt and Activate Plan'}
+                          </Button>
+                          <Button variant="outline" onClick={() => setShowSubscription(false)}>
+                            {isArabic ? 'إلغاء' : 'Cancel'}
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          )}
+
           {/* Registered Students Section */}
+          {isSubscriptionApproved && (
           <Card className="mb-6">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -720,7 +1471,9 @@ export const TeacherDashboard = () => {
               )}
             </CardContent>
           </Card>
+          )}
 
+          {isSubscriptionApproved && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* My Courses Section */}
             <div className="lg:col-span-2">
@@ -789,7 +1542,8 @@ export const TeacherDashboard = () => {
               </Card>
             </div>
 
-            {/* Notifications Section */}
+            {/* Notifications Section (visible only for subscribed teachers) */}
+            {isSubscriptionApproved && (
             <div>
               <Card>
                 <CardHeader>
@@ -833,7 +1587,9 @@ export const TeacherDashboard = () => {
                 </CardContent>
               </Card>
             </div>
+            )}
           </div>
+          )}
 
           {/* Getting Started Section for New Teachers */}
           {courses.length === 0 && (

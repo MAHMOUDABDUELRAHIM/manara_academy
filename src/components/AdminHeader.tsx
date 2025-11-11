@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import {
@@ -11,15 +11,41 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { User, Settings, LogOut, ChevronDown } from 'lucide-react';
+import { db } from '@/firebase/config';
+import { doc, onSnapshot } from 'firebase/firestore';
 
 const AdminHeader: React.FC = () => {
   const { language, t } = useLanguage();
   const [adminName] = useState('Admin User');
+  const [trialCfg, setTrialCfg] = useState<{ unit: 'days' | 'minutes'; value: number } | null>(null);
+
+  useEffect(() => {
+    const ref = doc(db, 'settings', 'trial');
+    const unsub = onSnapshot(ref, (snap) => {
+      if (snap.exists()) {
+        const data: any = snap.data();
+        const unit = data?.unit === 'minutes' ? 'minutes' : 'days';
+        const value = typeof data?.value === 'number' && data.value > 0 ? data.value : 1;
+        setTrialCfg({ unit, value });
+      } else {
+        try {
+          const cached = localStorage.getItem('trialSettings');
+          if (cached) {
+            const parsed = JSON.parse(cached);
+            const unit = parsed?.unit === 'minutes' ? 'minutes' : 'days';
+            const value = typeof parsed?.value === 'number' && parsed.value > 0 ? parsed.value : 1;
+            setTrialCfg({ unit, value });
+          }
+        } catch {}
+      }
+    });
+    return () => unsub();
+  }, []);
 
   return (
     <header className="bg-background border-b border-border h-16 flex items-center justify-between px-6 sticky top-0 z-40">
       {/* Logo */}
-      <div className="flex items-center">
+      <div className="flex items-center gap-4">
         <Link to="/admin-dashboard" className="flex items-center space-x-2">
           <img 
             src="/Header-Logo.png" 
@@ -27,6 +53,14 @@ const AdminHeader: React.FC = () => {
             className="h-8 w-auto"
           />
         </Link>
+        <div className="hidden md:flex items-center text-xs text-muted-foreground">
+          <span>{language === 'ar' ? 'مدة التجربة:' : 'Trial Duration:'}</span>
+          <span className="ms-1 font-medium">
+            {trialCfg
+              ? `${trialCfg.value} ${trialCfg.unit === 'minutes' ? (language === 'ar' ? 'دقيقة' : 'min') : (language === 'ar' ? 'يوم' : 'day')}`
+              : (language === 'ar' ? 'افتراضي: يوم' : 'Default: 1 day')}
+          </span>
+        </div>
       </div>
 
       {/* Admin Profile Dropdown */}

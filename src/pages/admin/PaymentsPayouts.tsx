@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -25,6 +25,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
+  DialogClose,
 } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -45,23 +46,25 @@ import {
   TrendingUp,
   Download
 } from 'lucide-react';
+import { toast } from 'sonner';
+import { auth, db } from '@/firebase/config';
+import { doc, onSnapshot, setDoc, serverTimestamp, collection, query, orderBy, updateDoc } from 'firebase/firestore';
 
-interface Payment {
+interface AdminPayment {
   id: string;
-  student: {
+  teacher: {
     name: string;
     email: string;
     avatar?: string;
-  };
-  course: {
-    title: string;
     id: string;
   };
   amount: number;
-  date: string;
-  status: 'completed' | 'pending' | 'failed' | 'refunded';
-  paymentMethod: string;
-  transactionId: string;
+  currency?: 'USD' | 'EGP' | 'JOD';
+  createdAt: string; // formatted
+  status: 'pending' | 'approved' | 'rejected' | 'completed' | 'failed' | 'refunded';
+  planId?: string;
+  walletNumber?: string;
+  receiptBase64?: string;
 }
 
 interface PayoutRequest {
@@ -90,11 +93,107 @@ const PaymentsPayouts: React.FC = () => {
   const [dateFilter, setDateFilter] = useState<string>('all');
   const [selectedPayout, setSelectedPayout] = useState<PayoutRequest | null>(null);
 
-  // Mock payments data - will be replaced with real data from backend
-  const [payments] = useState<Payment[]>([]);
+  // Payments from Firestore
+  const [payments, setPayments] = useState<AdminPayment[]>([]);
 
   // Mock payout requests data - will be replaced with real data from backend
   const [payoutRequests, setPayoutRequests] = useState<PayoutRequest[]>([]);
+
+  // Admin wallet/phone number state
+  const [adminWalletInput, setAdminWalletInput] = useState('');
+  const [savingWallet, setSavingWallet] = useState(false);
+  const [currentAdminWallet, setCurrentAdminWallet] = useState('');
+
+  // Subscribe to settings/payment for existing admin wallet number
+  useEffect(() => {
+    const unsub = onSnapshot(doc(db, 'settings', 'payment'), (snap) => {
+      const data = snap.data() as any;
+      const wallet = typeof data?.adminWalletNumber === 'string' ? data.adminWalletNumber : '';
+      setCurrentAdminWallet(wallet);
+      // Pre-fill input with current saved value
+      if (wallet) setAdminWalletInput(wallet);
+    }, (err) => {
+      console.error('Failed to subscribe to admin wallet setting:', err);
+    });
+    return () => unsub();
+  }, []);
+
+  // Subscribe to payments collection from Firestore
+  useEffect(() => {
+    const paymentsRef = collection(db, 'payments');
+    const q = query(paymentsRef, orderBy('createdAt', 'desc'));
+    const unsub = onSnapshot(q, (snapshot) => {
+      const rows: AdminPayment[] = snapshot.docs.map((d) => {
+        const data = d.data() as any;
+        const ts = data.createdAt?.toDate ? data.createdAt.toDate() : (typeof data.createdAt === 'number' ? new Date(data.createdAt) : new Date());
+        const formattedDate = ts.toLocaleString();
+        return {
+          id: d.id,
+          teacher: {
+            name: data.teacherName || '—',
+            email: data.teacherEmail || '—',
+            avatar: undefined,
+            id: data.teacherId || '—',
+          },
+          amount: typeof data.amount === 'number' ? data.amount : 0,
+          currency: data.currency,
+          createdAt: formattedDate,
+          status: (data.status as AdminPayment['status']) || 'pending',
+          planId: data.planId,
+          walletNumber: data.walletNumber,
+          receiptBase64: data.receiptBase64,
+        };
+      });
+      setPayments(rows);
+    }, (err) => {
+      console.error('Failed to subscribe to payments:', err);
+      toast.error(language === 'ar' ? 'تعذر تحميل المدفوعات من فايرستور.' : 'Failed to load payments from Firestore.');
+    });
+    return () => unsub();
+  }, [language]);
+
+  const validateWallet = (raw: string) => {
+    // Allow digits, spaces, dashes, leading +; normalize to digits with optional leading +
+    const trimmed = raw.trim();
+    const allowed = /^[+]?([0-9][ \-]?){6,20}$/;
+    return allowed.test(trimmed);
+  };
+
+  const normalizeWallet = (raw: string) => {
+    const t = raw.trim();
+    const hasPlus = t.startsWith('+');
+    const digits = t.replace(/[^0-9]/g, '');
+    return (hasPlus ? '+' : '') + digits;
+  };
+
+  const handleSaveAdminWallet = async () => {
+    const input = adminWalletInput;
+    if (!validateWallet(input)) {
+      toast.error(language === 'ar' ? 'الرقم غير صالح. تحقق من التنسيق.' : 'Invalid number. Please check the format.');
+      return;
+    }
+    const normalized = normalizeWallet(input);
+    try {
+      setSavingWallet(true);
+      await setDoc(
+        doc(db, 'settings', 'payment'),
+        {
+          adminWalletNumber: normalized,
+          adminWalletUpdatedBy: auth.currentUser?.uid || null,
+          adminWalletUpdatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+      setCurrentAdminWallet(normalized);
+      setAdminWalletInput(normalized);
+      toast.success(language === 'ar' ? 'تم حفظ رقم الهاتف/المحفظة بنجاح' : 'Phone/Wallet number saved successfully');
+    } catch (e) {
+      console.error('Failed to save admin wallet number:', e);
+      toast.error(language === 'ar' ? 'فشل حفظ الرقم. حاول مرة أخرى.' : 'Failed to save number. Please try again.');
+    } finally {
+      setSavingWallet(false);
+    }
+  };
 
   const getPaymentStatusBadge = (status: string) => {
     switch (status) {
@@ -102,6 +201,10 @@ const PaymentsPayouts: React.FC = () => {
         return <Badge variant="default" className="bg-green-100 text-green-800">{language === 'ar' ? 'مكتمل' : 'Completed'}</Badge>;
       case 'pending':
         return <Badge variant="secondary" className="bg-yellow-100 text-yellow-800">{language === 'ar' ? 'معلق' : 'Pending'}</Badge>;
+      case 'approved':
+        return <Badge variant="default" className="bg-blue-100 text-blue-800">{language === 'ar' ? 'موافق عليه' : 'Approved'}</Badge>;
+      case 'rejected':
+        return <Badge variant="destructive">{language === 'ar' ? 'مرفوض' : 'Rejected'}</Badge>;
       case 'failed':
         return <Badge variant="destructive">{language === 'ar' ? 'فشل' : 'Failed'}</Badge>;
       case 'refunded':
@@ -147,8 +250,8 @@ const PaymentsPayouts: React.FC = () => {
   };
 
   const filteredPayments = payments.filter(payment => {
-    const matchesSearch = payment.student.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         payment.course.title.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesSearch = payment.teacher.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         payment.teacher.email.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesStatus = statusFilter === 'all' || payment.status === statusFilter;
     return matchesSearch && matchesStatus;
   });
@@ -157,6 +260,14 @@ const PaymentsPayouts: React.FC = () => {
     const matchesSearch = payout.teacher.name.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesStatus = statusFilter === 'all' || payout.status === statusFilter;
     return matchesSearch && matchesStatus;
+  });
+
+  // List of approved payments for the renamed tab
+  const approvedPayments = payments.filter(payment => {
+    const isApproved = payment.status === 'approved';
+    const matchesSearch = payment.teacher.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                          payment.teacher.email.toLowerCase().includes(searchTerm.toLowerCase());
+    return isApproved && matchesSearch;
   });
 
   // Calculate totals - will be fetched from backend
@@ -249,12 +360,47 @@ const PaymentsPayouts: React.FC = () => {
                 {language === 'ar' ? 'المدفوعات' : 'Payments'}
               </TabsTrigger>
               <TabsTrigger value="payouts">
-                {language === 'ar' ? 'طلبات السحب' : 'Payout Requests'}
+                {language === 'ar' ? 'المدفوعات المقبولة' : 'Approved Payments'}
               </TabsTrigger>
             </TabsList>
 
             {/* Payments Tab */}
             <TabsContent value="payments" className="space-y-6">
+              {/* Admin Wallet/Phone Number Settings */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>
+                    {language === 'ar' ? 'رقم الهاتف/المحفظة لقبول المدفوعات' : 'Phone/Wallet Number for Payments'}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid gap-3 max-w-xl">
+                    <label htmlFor="admin-wallet-input" className="text-sm font-medium">
+                      {language === 'ar' ? 'أدخل رقم الهاتف أو المحفظة' : 'Enter phone or wallet number'}
+                    </label>
+                    <Input
+                      id="admin-wallet-input"
+                      value={adminWalletInput}
+                      onChange={(e) => setAdminWalletInput(e.target.value)}
+                      placeholder={language === 'ar' ? 'مثال: +201234567890 أو 010-1234-5678' : 'e.g., +201234567890 or 010-1234-5678'}
+                      inputMode="numeric"
+                    />
+                    <div className="flex items-center gap-2">
+                      <Button onClick={handleSaveAdminWallet} disabled={savingWallet}>
+                        {language === 'ar' ? 'حفظ' : 'Save'}
+                      </Button>
+                      {currentAdminWallet && (
+                        <Badge variant="outline" className="text-muted-foreground">
+                          {language === 'ar' ? 'القيمة الحالية:' : 'Current:'} {currentAdminWallet}
+                        </Badge>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {language === 'ar' ? 'سيتم حفظ الرقم وربطه بحساب الأدمن الحالي، وسيظهر للمدرسين في صفحة الاشتراك بشكل للقراءة فقط.' : 'This number is saved, linked to the current admin, and shown read-only in teachers’ subscription dialog.'}
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
               {/* Filters */}
               <Card>
                 <CardHeader>
@@ -296,7 +442,7 @@ const PaymentsPayouts: React.FC = () => {
                 </CardContent>
               </Card>
 
-              {/* Payments Table */}
+              {/* Payments Table (from Firestore) */}
               <Card>
                 <CardHeader>
                   <CardTitle>
@@ -308,12 +454,13 @@ const PaymentsPayouts: React.FC = () => {
                     <Table>
                       <TableHeader>
                         <TableRow>
-                          <TableHead>{language === 'ar' ? 'الطالب' : 'Student'}</TableHead>
-                          <TableHead>{language === 'ar' ? 'الدورة' : 'Course'}</TableHead>
+                          <TableHead>{language === 'ar' ? 'المعلم' : 'Teacher'}</TableHead>
                           <TableHead>{language === 'ar' ? 'المبلغ' : 'Amount'}</TableHead>
+                          <TableHead>{language === 'ar' ? 'العملة' : 'Currency'}</TableHead>
                           <TableHead>{language === 'ar' ? 'التاريخ' : 'Date'}</TableHead>
                           <TableHead>{language === 'ar' ? 'الحالة' : 'Status'}</TableHead>
-                          <TableHead>{language === 'ar' ? 'طريقة الدفع' : 'Payment Method'}</TableHead>
+                          <TableHead>{language === 'ar' ? 'إيصال الدفع' : 'Payment Receipt'}</TableHead>
+                          <TableHead>{language === 'ar' ? 'الإجراء' : 'Action'}</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -322,35 +469,90 @@ const PaymentsPayouts: React.FC = () => {
                             <TableCell>
                               <div className="flex items-center gap-3">
                                 <Avatar className="h-8 w-8">
-                                  <AvatarImage src={payment.student.avatar} alt={payment.student.name} />
+                                  <AvatarImage src={payment.teacher.avatar} alt={payment.teacher.name} />
                                   <AvatarFallback className="bg-primary/10 text-primary text-sm">
-                                    {payment.student.name.split(' ').map(n => n[0]).join('')}
+                                    {payment.teacher.name.split(' ').map(n => n[0]).join('')}
                                   </AvatarFallback>
                                 </Avatar>
                                 <div>
-                                  <div className="font-medium">{payment.student.name}</div>
-                                  <div className="text-sm text-muted-foreground">{payment.student.email}</div>
+                                  <div className="font-medium">{payment.teacher.name}</div>
+                                  <div className="text-sm text-muted-foreground">{payment.teacher.email}</div>
                                 </div>
                               </div>
                             </TableCell>
                             <TableCell>
-                              <div className="flex items-center gap-2">
-                                <BookOpen className="h-4 w-4 text-muted-foreground" />
-                                <span className="text-sm">{payment.course.title}</span>
-                              </div>
+                              <span className="font-medium">{payment.amount}</span>
                             </TableCell>
                             <TableCell>
-                              <span className="font-medium">${payment.amount}</span>
+                              <Badge variant="outline">{payment.currency || 'USD'}</Badge>
                             </TableCell>
                             <TableCell>
                               <div className="flex items-center gap-1">
                                 <Calendar className="h-4 w-4 text-muted-foreground" />
-                                <span className="text-sm">{payment.date}</span>
+                                <span className="text-sm">{payment.createdAt}</span>
                               </div>
                             </TableCell>
                             <TableCell>{getPaymentStatusBadge(payment.status)}</TableCell>
                             <TableCell>
-                              <span className="text-sm">{payment.paymentMethod}</span>
+                              {payment.receiptBase64 ? (
+                                <Dialog>
+                                  <DialogTrigger asChild>
+                                    <Button variant="ghost" size="sm">
+                                      {language === 'ar' ? 'إيصال الدفع' : 'View Receipt'}
+                                    </Button>
+                                  </DialogTrigger>
+                                  <DialogContent className="max-w-3xl">
+                                    <DialogHeader>
+                                      <DialogTitle>
+                                        {language === 'ar' ? 'إيصال الدفع' : 'Payment Receipt'}
+                                      </DialogTitle>
+                                    </DialogHeader>
+                                    <div className="relative">
+                                      <img
+                                        src={payment.receiptBase64}
+                                        alt={language === 'ar' ? 'صورة إيصال الدفع' : 'Payment receipt image'}
+                                        className="max-h-[75vh] mx-auto rounded-lg"
+                                      />
+                                      <DialogClose asChild>
+                                        <Button
+                                          variant="ghost"
+                                          size="icon"
+                                          className="absolute right-3 top-3"
+                                          aria-label={language === 'ar' ? 'إغلاق' : 'Close'}
+                                        >
+                                          <X className="h-4 w-4" />
+                                        </Button>
+                                      </DialogClose>
+                                    </div>
+                                  </DialogContent>
+                                </Dialog>
+                              ) : (
+                                <span className="text-sm text-muted-foreground">
+                                  {language === 'ar' ? 'لا يوجد إيصال' : 'No receipt'}
+                                </span>
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex items-center gap-2">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleApprovePayment(payment.id)}
+                                  disabled={payment.status !== 'pending'}
+                                >
+                                  <Check className="h-4 w-4 mr-1" />
+                                  {language === 'ar' ? 'قبول' : 'Approve'}
+                                </Button>
+                                <Button
+                                  variant="destructive"
+                                  size="sm"
+                                  onClick={() => handleRejectPayment(payment.id)}
+                                  disabled={payment.status !== 'pending'}
+                                >
+                                  <X className="h-4 w-4 mr-1" />
+                                  {language === 'ar' ? 'رفض' : 'Reject'}
+                                </Button>
+                              </div>
                             </TableCell>
                           </TableRow>
                         ))}
@@ -384,18 +586,7 @@ const PaymentsPayouts: React.FC = () => {
                         />
                       </div>
                     </div>
-                    <Select value={statusFilter} onValueChange={setStatusFilter}>
-                      <SelectTrigger className="w-full md:w-48">
-                        <SelectValue placeholder={language === 'ar' ? 'تصفية بالحالة' : 'Filter by Status'} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">{language === 'ar' ? 'جميع الحالات' : 'All Status'}</SelectItem>
-                        <SelectItem value="pending">{language === 'ar' ? 'معلق' : 'Pending'}</SelectItem>
-                        <SelectItem value="approved">{language === 'ar' ? 'موافق عليه' : 'Approved'}</SelectItem>
-                        <SelectItem value="processed">{language === 'ar' ? 'تم التحويل' : 'Processed'}</SelectItem>
-                        <SelectItem value="rejected">{language === 'ar' ? 'مرفوض' : 'Rejected'}</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    
                   </div>
                 </CardContent>
               </Card>
@@ -404,7 +595,7 @@ const PaymentsPayouts: React.FC = () => {
               <Card>
                 <CardHeader>
                   <CardTitle>
-                    {language === 'ar' ? `طلبات السحب (${filteredPayouts.length})` : `Payout Requests (${filteredPayouts.length})`}
+                    {language === 'ar' ? `المدفوعات المقبولة (${approvedPayments.length})` : `Approved Payments (${approvedPayments.length})`}
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -414,183 +605,64 @@ const PaymentsPayouts: React.FC = () => {
                         <TableRow>
                           <TableHead>{language === 'ar' ? 'المدرس' : 'Teacher'}</TableHead>
                           <TableHead>{language === 'ar' ? 'المبلغ' : 'Amount'}</TableHead>
+                          <TableHead>{language === 'ar' ? 'العملة' : 'Currency'}</TableHead>
                           <TableHead>{language === 'ar' ? 'التاريخ' : 'Date'}</TableHead>
                           <TableHead>{language === 'ar' ? 'الحالة' : 'Status'}</TableHead>
-                          <TableHead>{language === 'ar' ? 'طريقة الدفع' : 'Method'}</TableHead>
-                          <TableHead>{language === 'ar' ? 'الإجراءات' : 'Actions'}</TableHead>
+                          <TableHead>{language === 'ar' ? 'إيصال الدفع' : 'Payment Receipt'}</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {filteredPayouts.map((payout) => (
-                          <TableRow key={payout.id}>
+                        {approvedPayments.map((payment) => (
+                          <TableRow key={payment.id}>
                             <TableCell>
                               <div className="flex items-center gap-3">
                                 <Avatar className="h-8 w-8">
-                                  <AvatarImage src={payout.teacher.avatar} alt={payout.teacher.name} />
+                                  <AvatarImage src={payment.teacher.avatar} alt={payment.teacher.name} />
                                   <AvatarFallback className="bg-primary/10 text-primary text-sm">
-                                    {payout.teacher.name.split(' ').map(n => n[0]).join('')}
+                                    {payment.teacher.name.split(' ').map(n => n[0]).join('')}
                                   </AvatarFallback>
                                 </Avatar>
                                 <div>
-                                  <div className="font-medium">{payout.teacher.name}</div>
-                                  <div className="text-sm text-muted-foreground">{payout.teacher.email}</div>
+                                  <div className="font-medium">{payment.teacher.name}</div>
+                                  <div className="text-sm text-muted-foreground">{payment.teacher.email}</div>
                                 </div>
                               </div>
                             </TableCell>
                             <TableCell>
-                              <span className="font-medium">${payout.amount}</span>
+                              <span className="font-medium">{payment.amount}</span>
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant="outline">{payment.currency || 'USD'}</Badge>
                             </TableCell>
                             <TableCell>
                               <div className="flex items-center gap-1">
                                 <Calendar className="h-4 w-4 text-muted-foreground" />
-                                <span className="text-sm">{payout.requestDate}</span>
+                                <span className="text-sm">{payment.createdAt}</span>
                               </div>
                             </TableCell>
-                            <TableCell>{getPayoutStatusBadge(payout.status)}</TableCell>
+                            <TableCell>{getPaymentStatusBadge(payment.status)}</TableCell>
                             <TableCell>
-                              <Badge variant="outline">
-                                {payout.paymentMethod === 'bank_transfer' ? 
-                                  (language === 'ar' ? 'تحويل بنكي' : 'Bank Transfer') :
-                                  payout.paymentMethod === 'paypal' ? 'PayPal' : 'Stripe'
-                                }
-                              </Badge>
-                            </TableCell>
-                            <TableCell>
-                              <div className="flex items-center gap-2">
+                              {payment.receiptBase64 ? (
                                 <Dialog>
                                   <DialogTrigger asChild>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={() => setSelectedPayout(payout)}
-                                    >
-                                      <Eye className="h-4 w-4" />
+                                    <Button variant="ghost" size="sm">
+                                      {language === 'ar' ? 'عرض الإيصال' : 'View Receipt'}
                                     </Button>
                                   </DialogTrigger>
-                                  <DialogContent className="max-w-2xl">
+                                  <DialogContent className="max-w-3xl">
                                     <DialogHeader>
                                       <DialogTitle>
-                                        {language === 'ar' ? 'تفاصيل طلب السحب' : 'Payout Request Details'}
+                                        {language === 'ar' ? 'إيصال الدفع' : 'Payment Receipt'}
                                       </DialogTitle>
                                     </DialogHeader>
-                                    {selectedPayout && (
-                                      <div className="space-y-6">
-                                        {/* Teacher Info */}
-                                        <div className="flex items-center gap-4">
-                                          <Avatar className="h-16 w-16">
-                                            <AvatarImage src={selectedPayout.teacher.avatar} alt={selectedPayout.teacher.name} />
-                                            <AvatarFallback className="bg-primary/10 text-primary text-lg">
-                                              {selectedPayout.teacher.name.split(' ').map(n => n[0]).join('')}
-                                            </AvatarFallback>
-                                          </Avatar>
-                                          <div>
-                                            <h3 className="text-xl font-semibold">{selectedPayout.teacher.name}</h3>
-                                            <p className="text-muted-foreground">{selectedPayout.teacher.email}</p>
-                                            {getPayoutStatusBadge(selectedPayout.status)}
-                                          </div>
-                                        </div>
-
-                                        {/* Payout Details */}
-                                        <div className="grid grid-cols-2 gap-4">
-                                          <div>
-                                            <label className="text-sm font-medium text-muted-foreground">
-                                              {language === 'ar' ? 'المبلغ المطلوب' : 'Requested Amount'}
-                                            </label>
-                                            <p className="text-2xl font-bold">${selectedPayout.amount}</p>
-                                          </div>
-                                          <div>
-                                            <label className="text-sm font-medium text-muted-foreground">
-                                              {language === 'ar' ? 'تاريخ الطلب' : 'Request Date'}
-                                            </label>
-                                            <p className="text-lg">{selectedPayout.requestDate}</p>
-                                          </div>
-                                        </div>
-
-                                        {/* Payment Method Details */}
-                                        <div className="border rounded-lg p-4">
-                                          <h4 className="font-medium mb-3">
-                                            {language === 'ar' ? 'تفاصيل طريقة الدفع' : 'Payment Method Details'}
-                                          </h4>
-                                          {selectedPayout.paymentMethod === 'bank_transfer' && selectedPayout.bankDetails && (
-                                            <div className="space-y-2">
-                                              <div>
-                                                <span className="text-sm font-medium">
-                                                  {language === 'ar' ? 'اسم البنك:' : 'Bank Name:'}
-                                                </span>
-                                                <span className="ml-2">{selectedPayout.bankDetails.bankName}</span>
-                                              </div>
-                                              <div>
-                                                <span className="text-sm font-medium">
-                                                  {language === 'ar' ? 'رقم الحساب:' : 'Account Number:'}
-                                                </span>
-                                                <span className="ml-2">{selectedPayout.bankDetails.accountNumber}</span>
-                                              </div>
-                                            </div>
-                                          )}
-                                          {selectedPayout.paymentMethod === 'paypal' && selectedPayout.paypalEmail && (
-                                            <div>
-                                              <span className="text-sm font-medium">
-                                                {language === 'ar' ? 'بريد PayPal:' : 'PayPal Email:'}
-                                              </span>
-                                              <span className="ml-2">{selectedPayout.paypalEmail}</span>
-                                            </div>
-                                          )}
-                                        </div>
-
-                                        {/* Notes */}
-                                        {selectedPayout.notes && (
-                                          <div>
-                                            <label className="text-sm font-medium text-muted-foreground">
-                                              {language === 'ar' ? 'ملاحظات' : 'Notes'}
-                                            </label>
-                                            <p className="mt-1 p-3 bg-muted rounded-lg">{selectedPayout.notes}</p>
-                                          </div>
-                                        )}
-
-                                        {/* Action Buttons */}
-                                        {selectedPayout.status === 'pending' && (
-                                          <div className="flex gap-2 pt-4 border-t">
-                                            <Button
-                                              onClick={() => handleApprovePayout(selectedPayout.id)}
-                                              className="bg-green-600 hover:bg-green-700"
-                                            >
-                                              <Check className="h-4 w-4 mr-2" />
-                                              {language === 'ar' ? 'موافقة' : 'Approve'}
-                                            </Button>
-                                            <Button
-                                              variant="destructive"
-                                              onClick={() => handleRejectPayout(selectedPayout.id)}
-                                            >
-                                              <X className="h-4 w-4 mr-2" />
-                                              {language === 'ar' ? 'رفض' : 'Reject'}
-                                            </Button>
-                                          </div>
-                                        )}
-                                      </div>
-                                    )}
+                                    <div className="relative">
+                                      <img src={payment.receiptBase64} alt="Payment receipt" className="max-h-[24rem] w-auto" />
+                                    </div>
                                   </DialogContent>
                                 </Dialog>
-                                {payout.status === 'pending' && (
-                                  <>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={() => handleApprovePayout(payout.id)}
-                                      className="text-green-600 hover:text-green-700"
-                                    >
-                                      <Check className="h-4 w-4" />
-                                    </Button>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={() => handleRejectPayout(payout.id)}
-                                      className="text-destructive hover:text-destructive"
-                                    >
-                                      <X className="h-4 w-4" />
-                                    </Button>
-                                  </>
-                                )}
-                              </div>
+                              ) : (
+                                <span className="text-muted-foreground">-</span>
+                              )}
                             </TableCell>
                           </TableRow>
                         ))}
@@ -613,3 +685,30 @@ const PaymentsPayouts: React.FC = () => {
 };
 
 export default PaymentsPayouts;
+  const handleApprovePayment = async (paymentId: string) => {
+    try {
+      await updateDoc(doc(db, 'payments', paymentId), {
+        status: 'approved',
+        approvedAt: serverTimestamp(),
+        approvedBy: auth.currentUser?.uid || null,
+      });
+      toast.success(language === 'ar' ? 'تم قبول الدفع.' : 'Payment approved.');
+    } catch (e) {
+      console.error('Failed to approve payment:', e);
+      toast.error(language === 'ar' ? 'تعذر قبول الدفع.' : 'Failed to approve payment.');
+    }
+  };
+
+  const handleRejectPayment = async (paymentId: string) => {
+    try {
+      await updateDoc(doc(db, 'payments', paymentId), {
+        status: 'rejected',
+        rejectedAt: serverTimestamp(),
+        rejectedBy: auth.currentUser?.uid || null,
+      });
+      toast.success(language === 'ar' ? 'تم رفض الدفع.' : 'Payment rejected.');
+    } catch (e) {
+      console.error('Failed to reject payment:', e);
+      toast.error(language === 'ar' ? 'تعذر رفض الدفع.' : 'Failed to reject payment.');
+    }
+  };

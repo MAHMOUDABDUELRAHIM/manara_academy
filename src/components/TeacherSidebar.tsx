@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -15,7 +15,8 @@ import {
   User,
   Settings,
   UserPlus,
-  CheckSquare
+  CheckSquare,
+  Lock
 } from "lucide-react";
 
 interface SidebarItem {
@@ -27,13 +28,38 @@ interface SidebarItem {
 
 interface TeacherSidebarProps {
   className?: string;
+  isSubscriptionApproved?: boolean;
 }
 
-export const TeacherSidebar = ({ className }: TeacherSidebarProps) => {
+export const TeacherSidebar = ({ className, isSubscriptionApproved = false }: TeacherSidebarProps) => {
   const { language, t } = useLanguage();
   const location = useLocation();
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [isMobileOpen, setIsMobileOpen] = useState(false);
+
+  // Effective approval status: prefer prop when provided, otherwise fall back to localStorage
+  const [approved, setApproved] = useState<boolean>(isSubscriptionApproved);
+  const [trialExpired, setTrialExpired] = useState<boolean>(() => {
+    try { return localStorage.getItem('trialExpired') === 'true'; } catch { return false; }
+  });
+  useEffect(() => {
+    let fallback = false;
+    try { fallback = localStorage.getItem('isSubscriptionApproved') === 'true'; } catch {}
+    setApproved(isSubscriptionApproved || fallback);
+  }, [isSubscriptionApproved]);
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === 'isSubscriptionApproved') {
+        const val = e.newValue === 'true';
+        setApproved((prev) => (isSubscriptionApproved ? isSubscriptionApproved : val));
+      }
+      if (e.key === 'trialExpired') {
+        setTrialExpired(e.newValue === 'true');
+      }
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, [isSubscriptionApproved]);
 
   const sidebarItems: SidebarItem[] = [
     {
@@ -62,8 +88,8 @@ export const TeacherSidebar = ({ className }: TeacherSidebarProps) => {
     },
     {
       id: 'invite-students',
-      label: language === 'ar' ? 'ادارة وتخصيص المنصة' : 'Invite Students',
-      icon: UserPlus,
+      label: language === 'ar' ? 'ادارة وتخصيص المنصة' : 'Platform Management and Customization',
+      icon: Settings,
       href: '/teacher/invite-students'
     },
     {
@@ -72,12 +98,7 @@ export const TeacherSidebar = ({ className }: TeacherSidebarProps) => {
       icon: DollarSign,
       href: '/teacher/payouts'
     },
-    {
-      id: 'profile',
-      label: language === 'ar' ? 'الملف الشخصي' : 'Profile',
-      icon: User,
-      href: '/teacher/profile'
-    }
+    
   ];
 
   const isActive = (href: string) => {
@@ -157,23 +178,38 @@ export const TeacherSidebar = ({ className }: TeacherSidebarProps) => {
             {sidebarItems.map((item) => {
               const Icon = item.icon;
               const active = isActive(item.href);
-              
+              // Lock only if trial has expired AND subscription not approved
+              const locked = (!approved && trialExpired) && item.id !== 'dashboard';
+              // Always navigate to intended href; rely on ProtectedRoute for gating/redirect
+              const targetHref = item.href;
+
               return (
                 <li key={item.id}>
                   <Link
-                    to={item.href}
+                    to={targetHref}
                     onClick={() => setIsMobileOpen(false)}
+                    aria-disabled={locked}
                     className={cn(
                       "flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors",
                       "hover:bg-gray-100 hover:text-[#2c4656]",
                       active && "bg-[#2c4656] text-white hover:bg-[#1e3240]",
-                      isCollapsed && "justify-center px-2"
+                      isCollapsed && "justify-center px-2",
+                      locked && "opacity-60 cursor-not-allowed"
                     )}
                   >
-                    <Icon className={cn("h-5 w-5 flex-shrink-0")} />
+                    {locked ? (
+                      <Lock className={cn("h-5 w-5 flex-shrink-0")} />
+                    ) : (
+                      <Icon className={cn("h-5 w-5 flex-shrink-0")} />
+                    )}
                     {!isCollapsed && (
                       <span className="text-sm font-medium truncate">
                         {item.label}
+                        {locked && (
+                          <span className="ml-2 text-xs text-muted-foreground">
+                            {language === 'ar' ? 'مغلق حتى التفعيل' : 'Locked until activation'}
+                          </span>
+                        )}
                       </span>
                     )}
                   </Link>

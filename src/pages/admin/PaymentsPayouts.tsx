@@ -48,7 +48,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { auth, db } from '@/firebase/config';
-import { doc, onSnapshot, setDoc, serverTimestamp, collection, query, orderBy, updateDoc } from 'firebase/firestore';
+import { doc, onSnapshot, setDoc, serverTimestamp, collection, query, orderBy, updateDoc, getDoc, where, getDocs } from 'firebase/firestore';
 
 interface AdminPayment {
   id: string;
@@ -192,6 +192,90 @@ const PaymentsPayouts: React.FC = () => {
       toast.error(language === 'ar' ? 'فشل حفظ الرقم. حاول مرة أخرى.' : 'Failed to save number. Please try again.');
     } finally {
       setSavingWallet(false);
+    }
+  };
+
+  const handleApprovePayment = async (paymentId: string) => {
+    try {
+      const pRef = doc(db, 'payments', paymentId);
+      const pSnap = await getDoc(pRef);
+      const pdata: any = pSnap.exists() ? pSnap.data() : {};
+      let planDocData: any = null;
+      const planId: string | undefined = typeof pdata?.planId === 'string' ? pdata.planId : undefined;
+      const planName: string | undefined = typeof pdata?.planName === 'string' ? pdata.planName : undefined;
+      if (planId) {
+        const psnap = await getDoc(doc(db, 'pricingPlans', planId));
+        planDocData = psnap.exists() ? psnap.data() : null;
+      }
+      if (!planDocData && planName) {
+        const qByName = query(collection(db, 'pricingPlans'), where('name', '==', planName));
+        const s2 = await getDocs(qByName);
+        planDocData = s2.docs[0]?.data() || null;
+      }
+      let periodMs: number | null = null;
+      try {
+        const periodStr = (planDocData?.period || '').toString().toLowerCase();
+        const isYear = periodStr.includes('year') || periodStr.includes('annual') || periodStr.includes('سنوي') || periodStr.includes('سنة');
+        const isHalfYear = periodStr.includes('half') || periodStr.includes('semi') || periodStr.includes('semiannual') || periodStr.includes('semi-annual') || periodStr.includes('نصف') || periodStr.includes('نصف سنوي');
+        const isMonth = periodStr.includes('month') || periodStr.includes('monthly') || periodStr.includes('شهري') || periodStr.includes('شهر');
+        const isFiveMin = (periodStr.includes('5') && (periodStr.includes('minute') || periodStr.includes('minutes') || periodStr.includes('دقيقة') || periodStr.includes('دقائق')));
+        if (isFiveMin) {
+          periodMs = 5 * 60 * 1000;
+        } else if (isYear) {
+          periodMs = 365 * 24 * 60 * 60 * 1000;
+        } else if (isHalfYear) {
+          periodMs = 180 * 24 * 60 * 60 * 1000;
+        } else if (isMonth) {
+          periodMs = 30 * 24 * 60 * 60 * 1000;
+        }
+      } catch {}
+      if (!periodMs) {
+        const rawPeriod = (pdata?.period || '').toString().toLowerCase();
+        const isYear = rawPeriod.includes('year') || rawPeriod.includes('annual') || rawPeriod.includes('سنوي') || rawPeriod.includes('سنة');
+        const isHalfYear = rawPeriod.includes('half') || rawPeriod.includes('semi') || rawPeriod.includes('semiannual') || rawPeriod.includes('semi-annual') || rawPeriod.includes('نصف') || rawPeriod.includes('نصف سنوي') || rawPeriod.includes('ستة أشهر') || rawPeriod.includes('6 اشهر') || rawPeriod.includes('6 أشهر');
+        const isMonth = rawPeriod.includes('month') || rawPeriod.includes('monthly') || rawPeriod.includes('شهري') || rawPeriod.includes('شهر');
+        const isFiveMin = (rawPeriod.includes('5') && (rawPeriod.includes('minute') || rawPeriod.includes('minutes') || rawPeriod.includes('دقيقة') || rawPeriod.includes('دقائق')));
+        if (isFiveMin) {
+          periodMs = 5 * 60 * 1000;
+        } else if (isYear) {
+          periodMs = 365 * 24 * 60 * 60 * 1000;
+        } else if (isHalfYear) {
+          periodMs = 180 * 24 * 60 * 60 * 1000;
+        } else if (isMonth) {
+          periodMs = 30 * 24 * 60 * 60 * 1000;
+        }
+      }
+      if (!periodMs) {
+        toast.error(language === 'ar' ? 'لا توجد مدة محددة لهذه الباقة.' : 'No duration defined for this plan.');
+        return;
+      }
+      const expiresDate = new Date(Date.now() + periodMs);
+
+      await updateDoc(pRef, {
+        status: 'approved',
+        approvedAt: serverTimestamp(),
+        approvedBy: auth.currentUser?.uid || null,
+        approvedPeriodDays: Math.round(periodMs / (24 * 60 * 60 * 1000)),
+        expiresAt: expiresDate,
+      });
+      toast.success(language === 'ar' ? 'تم قبول الدفع وتم تحديد انتهاء الاشتراك.' : 'Payment approved and subscription expiry set.');
+    } catch (e) {
+      console.error('Failed to approve payment:', e);
+      toast.error(language === 'ar' ? 'تعذر قبول الدفع.' : 'Failed to approve payment.');
+    }
+  };
+
+  const handleRejectPayment = async (paymentId: string) => {
+    try {
+      await updateDoc(doc(db, 'payments', paymentId), {
+        status: 'rejected',
+        rejectedAt: serverTimestamp(),
+        rejectedBy: auth.currentUser?.uid || null,
+      });
+      toast.success(language === 'ar' ? 'تم رفض الدفع.' : 'Payment rejected.');
+    } catch (e) {
+      console.error('Failed to reject payment:', e);
+      toast.error(language === 'ar' ? 'تعذر رفض الدفع.' : 'Failed to reject payment.');
     }
   };
 
@@ -685,30 +769,3 @@ const PaymentsPayouts: React.FC = () => {
 };
 
 export default PaymentsPayouts;
-  const handleApprovePayment = async (paymentId: string) => {
-    try {
-      await updateDoc(doc(db, 'payments', paymentId), {
-        status: 'approved',
-        approvedAt: serverTimestamp(),
-        approvedBy: auth.currentUser?.uid || null,
-      });
-      toast.success(language === 'ar' ? 'تم قبول الدفع.' : 'Payment approved.');
-    } catch (e) {
-      console.error('Failed to approve payment:', e);
-      toast.error(language === 'ar' ? 'تعذر قبول الدفع.' : 'Failed to approve payment.');
-    }
-  };
-
-  const handleRejectPayment = async (paymentId: string) => {
-    try {
-      await updateDoc(doc(db, 'payments', paymentId), {
-        status: 'rejected',
-        rejectedAt: serverTimestamp(),
-        rejectedBy: auth.currentUser?.uid || null,
-      });
-      toast.success(language === 'ar' ? 'تم رفض الدفع.' : 'Payment rejected.');
-    } catch (e) {
-      console.error('Failed to reject payment:', e);
-      toast.error(language === 'ar' ? 'تعذر رفض الدفع.' : 'Failed to reject payment.');
-    }
-  };

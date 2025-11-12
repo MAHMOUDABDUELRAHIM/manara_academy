@@ -464,7 +464,9 @@ export const TeacherDashboard = () => {
       if (amount === null) {
         throw new Error(isArabic ? 'تعذر تحديد سعر الباقة المختارة.' : 'Unable to determine selected plan price.');
       }
-      const teacherId = user?.uid || (user as any)?.id || 'unknown';
+      // Use effectiveTeacherId (supports assistant accounts via proxyOf) to ensure
+      // subscription records match the ID used by route guards and listeners.
+      const teacherId = effectiveTeacherId || user?.uid || (user as any)?.id || 'unknown';
       const teacherName = (user?.profile?.fullName || user?.displayName || 'unknown') as string;
       const paymentDoc = {
         teacherId,
@@ -634,13 +636,22 @@ export const TeacherDashboard = () => {
       );
       const unsubscribe = onSnapshot(q, (snapshot) => {
         let hasApproved = false;
+        let hasValidApproved = false;
         let pendingForPlan: string | null = null;
         let hasRejected = false;
         let rejectedForPlan: string | null = null;
         snapshot.forEach((docSnap) => {
           const d = docSnap.data() as any;
           const st = d?.status;
-          if (st === 'approved') hasApproved = true;
+          if (st === 'approved') {
+            hasApproved = true;
+            const exp = d?.expiresAt?.toDate?.() || d?.expiresAt || null;
+            if (exp instanceof Date) {
+              if (Date.now() < exp.getTime()) {
+                hasValidApproved = true;
+              }
+            }
+          }
           else if (st === 'pending') pendingForPlan = typeof d?.planId === 'string' ? d.planId : pendingForPlan;
           else if (st === 'rejected') {
             hasRejected = true;
@@ -648,7 +659,7 @@ export const TeacherDashboard = () => {
           }
         });
 
-        if (hasApproved) {
+        if (hasValidApproved) {
           setIsSubscriptionApproved(true);
           try { localStorage.setItem('isSubscriptionApproved', 'true'); } catch {}
           setPendingPlanId(null);
@@ -1201,7 +1212,8 @@ export const TeacherDashboard = () => {
             </CardContent>
           </Card>
 
-          {/* Teacher Pricing Plans Section (moved below invitation link and welcome) */}
+          {/* Teacher Pricing Plans Section (hidden when subscription is active) */}
+          {!isSubscriptionApproved && (
           <div id="pricing" className="mb-8">
             <div className="text-center mb-6">
               {/* Removed pricing title as requested */}
@@ -1279,6 +1291,7 @@ export const TeacherDashboard = () => {
               ))}
           </div>
           </div>
+          )}
 
           {/* Subscription Section (appears after selecting a plan) */}
           {showSubscription && selectedPlan && (

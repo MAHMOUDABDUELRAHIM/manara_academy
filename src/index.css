@@ -169,3 +169,33 @@ All colors MUST be HSL.
 .fade-in.delay-200 { animation-delay: 0.2s; }
 .fade-in.delay-300 { animation-delay: 0.3s; }
 .fade-in.delay-400 { animation-delay: 0.4s; }
+
+/* Pretty scrollbar for dialogs and scrollable containers */
+.pretty-scrollbar {
+  scrollbar-width: thin; /* Firefox */
+  scrollbar-color: hsl(var(--primary)) hsl(var(--muted));
+  scroll-behavior: smooth;
+}
+.pretty-scrollbar::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.pretty-scrollbar::-webkit-scrollbar-track {
+  background: hsl(var(--muted));
+  border-radius: 9999px;
+}
+.pretty-scrollbar::-webkit-scrollbar-thumb {
+  background: linear-gradient(
+    to bottom,
+    hsl(var(--primary)) 0%,
+    hsl(var(--accent)) 100%
+  );
+  border-radius: 9999px;
+  border: 2px solid hsl(var(--secondary));
+}
+.pretty-scrollbar:hover::-webkit-scrollbar-thumb {
+  background: hsl(var(--primary));
+}
+.pretty-scrollbar::-webkit-scrollbar-corner {
+  background: transparent;
+}

@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import {
@@ -36,6 +37,7 @@ import {
 import { useLanguage } from '@/contexts/LanguageContext';
 import AdminHeader from '@/components/AdminHeader';
 import AdminSidebar from '@/components/AdminSidebar';
+import { TEACHER_FEATURES } from '@/constants/teacherFeatures';
 
 import {
   Settings as SettingsIcon,
@@ -68,6 +70,8 @@ interface Plan {
   features: string[];
   isPopular: boolean;
   status: 'active' | 'inactive';
+  storageGB?: number;
+  allowedSections?: Record<string, string[]>; // featureId -> sectionIds
 }
 
 const Settings: React.FC = () => {
@@ -137,6 +141,10 @@ const Settings: React.FC = () => {
           features: Array.isArray(d?.features) ? d.features : [],
           isPopular: !!d?.popular,
           status: (d?.status === 'inactive') ? 'inactive' : 'active',
+          storageGB: typeof d?.storageGB === 'number' ? d.storageGB : undefined,
+          allowedSections: typeof d?.allowedSections === 'object' && d?.allowedSections !== null
+            ? Object.fromEntries(Object.entries(d.allowedSections).map(([k, v]: [string, any]) => [k, Array.isArray(v) ? v.filter((s) => typeof s === 'string') : []]))
+            : {},
         });
       });
       // Optional: sort by order if present
@@ -284,6 +292,8 @@ const Settings: React.FC = () => {
         features: selectedPlan.features,
         popular: selectedPlan.isPopular,
         status: selectedPlan.status,
+        storageGB: Number(selectedPlan.storageGB) || 0,
+        allowedSections: selectedPlan.allowedSections || {},
         updatedAt: serverTimestamp(),
       };
       // If plan exists (by id) update; otherwise create with given id
@@ -316,7 +326,9 @@ const Settings: React.FC = () => {
       duration: 'شهري',
       features: [],
       isPopular: false,
-      status: 'inactive'
+      status: 'inactive',
+      storageGB: 0,
+      allowedSections: {},
     };
     setSelectedPlan(newPlan);
     setIsEditingPlan(true);
@@ -806,7 +818,7 @@ const Settings: React.FC = () => {
 
           {/* Plan Edit Dialog */}
           <Dialog open={isEditingPlan} onOpenChange={setIsEditingPlan}>
-            <DialogContent className="max-w-2xl">
+            <DialogContent className="max-w-3xl md:max-w-4xl">
               <DialogHeader>
                 <DialogTitle>
                   {selectedPlan?.id === Date.now().toString() 
@@ -820,7 +832,7 @@ const Settings: React.FC = () => {
               </DialogHeader>
               
               {selectedPlan && (
-                <div className="space-y-4">
+                <div className="pretty-scrollbar overflow-y-auto max-h-[75vh] pr-2 space-y-4">
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label htmlFor="planName">{language === 'ar' ? 'اسم الخطة' : 'Plan Name'}</Label>
@@ -858,6 +870,7 @@ const Settings: React.FC = () => {
                           <SelectItem value="ثانوي">{language === 'ar' ? 'ثانوي' : 'Secondary'}</SelectItem>
                           <SelectItem value="نصف ثانوي">{language === 'ar' ? 'نصف ثانوي' : 'Half-Secondary'}</SelectItem>
                           <SelectItem value="شهري">{language === 'ar' ? 'شهري' : 'Monthly'}</SelectItem>
+                          <SelectItem value="5 دقائق">{language === 'ar' ? '5 دقائق' : '5 minutes'}</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -872,6 +885,98 @@ const Settings: React.FC = () => {
                           <SelectItem value="inactive">{language === 'ar' ? 'غير نشط' : 'Inactive'}</SelectItem>
                         </SelectContent>
                       </Select>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="planStorageGB">{language === 'ar' ? 'المساحة المتاحة (جيجا)' : 'Available Storage (GB)'}</Label>
+                    <Input
+                      id="planStorageGB"
+                      type="number"
+                      min={0}
+                      value={selectedPlan.storageGB ?? 0}
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value);
+                        setSelectedPlan({
+                          ...selectedPlan,
+                          storageGB: Number.isFinite(val) ? val : 0,
+                        });
+                      }}
+                    />
+                  </div>
+
+                  {/* Allowed sections inside each page for this plan */}
+                  <div className="space-y-3 border rounded-lg p-3">
+                    <h3 className="text-sm font-semibold">
+                      {language === 'ar' ? 'الصفحات وسيشناتها ضمن هذه الباقة' : 'Pages and their Sessions in this Plan'}
+                    </h3>
+                    <p className="text-xs text-muted-foreground">
+                      {language === 'ar'
+                        ? 'اختر السيشنات داخل كل صفحة. إذا لم تُحدَّد أي سيشن لصفحة، تعتبر الصفحة غير مدرجة ومقفلة لمشتركي الباقة.'
+                        : 'Pick sessions inside each page. If no sessions are selected for a page, it is considered excluded and locked for subscribers.'}
+                    </p>
+                    <div className="space-y-4">
+                      {TEACHER_FEATURES.filter(f => f.id !== 'dashboard').map((f) => {
+                        const selectedForPage = (selectedPlan.allowedSections?.[f.id] || []);
+                        const pageIncluded = selectedForPage.length > 0;
+                        return (
+                          <div key={f.id} className="border rounded-md p-3">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm font-medium">{language === 'ar' ? f.labelAr : f.labelEn}</span>
+                                {pageIncluded ? (
+                                  <Badge variant="secondary" className="ml-1">{language === 'ar' ? 'مدرج' : 'Included'}</Badge>
+                                ) : (
+                                  <Badge variant="outline" className="ml-1">{language === 'ar' ? 'غير مدرج' : 'Excluded'}</Badge>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs text-muted-foreground">{language === 'ar' ? 'تضمين الصفحة' : 'Include Page'}</span>
+                                <Checkbox
+                                  checked={pageIncluded}
+                                  onCheckedChange={(val) => {
+                                    const current = selectedPlan.allowedSections || {};
+                                    const next = { ...current };
+                                    if (!val) {
+                                      next[f.id] = [];
+                                    } else {
+                                      // لا نحدد سيشنات افتراضياً؛ ينتقيها الأدمن لاحقاً
+                                      if (!Array.isArray(next[f.id])) next[f.id] = [];
+                                    }
+                                    setSelectedPlan({ ...selectedPlan, allowedSections: next });
+                                  }}
+                                />
+                              </div>
+                            </div>
+                            <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2">
+                              {f.sections.map((s) => {
+                                const isChecked = selectedForPage.includes(s.id);
+                                return (
+                                  <label key={s.id} className="flex items-center gap-2">
+                                    <Checkbox
+                                      checked={isChecked}
+                                      onCheckedChange={(val) => {
+                                        const current = selectedPlan.allowedSections || {};
+                                        const next = { ...current };
+                                        const arr = Array.isArray(next[f.id]) ? [...next[f.id]] : [];
+                                        if (val) {
+                                          if (!arr.includes(s.id)) arr.push(s.id);
+                                        } else {
+                                          const idx = arr.indexOf(s.id);
+                                          if (idx >= 0) arr.splice(idx, 1);
+                                        }
+                                        next[f.id] = arr;
+                                        setSelectedPlan({ ...selectedPlan, allowedSections: next });
+                                      }}
+                                    />
+                                    <span className="text-sm">{language === 'ar' ? s.labelAr : s.labelEn}</span>
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
 

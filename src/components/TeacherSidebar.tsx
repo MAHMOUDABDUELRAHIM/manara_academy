@@ -38,23 +38,49 @@ export const TeacherSidebar = ({ className, isSubscriptionApproved = false }: Te
   const [isMobileOpen, setIsMobileOpen] = useState(false);
 
   // Effective approval status: prefer prop when provided, otherwise fall back to localStorage
-  const [approved, setApproved] = useState<boolean>(isSubscriptionApproved);
+  const [approved, setApproved] = useState<boolean>(() => {
+    if (isSubscriptionApproved) return true;
+    try {
+      const active = localStorage.getItem('hasActiveSubscription') === 'true';
+      const approvedLS = localStorage.getItem('isSubscriptionApproved') === 'true';
+      return active || approvedLS;
+    } catch { return false; }
+  });
   const [trialExpired, setTrialExpired] = useState<boolean>(() => {
     try { return localStorage.getItem('trialExpired') === 'true'; } catch { return false; }
   });
+  const [allowedSections, setAllowedSections] = useState<Record<string, string[]> | null>(() => {
+    try {
+      const raw = localStorage.getItem('allowedSections');
+      return raw ? JSON.parse(raw) : null;
+    } catch { return null; }
+  });
   useEffect(() => {
-    let fallback = false;
-    try { fallback = localStorage.getItem('isSubscriptionApproved') === 'true'; } catch {}
-    setApproved(isSubscriptionApproved || fallback);
+    let active = false;
+    let approvedLS = false;
+    try {
+      active = localStorage.getItem('hasActiveSubscription') === 'true';
+      approvedLS = localStorage.getItem('isSubscriptionApproved') === 'true';
+    } catch {}
+    setApproved(isSubscriptionApproved || active || approvedLS);
   }, [isSubscriptionApproved]);
   useEffect(() => {
     const onStorage = (e: StorageEvent) => {
       if (e.key === 'isSubscriptionApproved') {
         const val = e.newValue === 'true';
-        setApproved((prev) => (isSubscriptionApproved ? isSubscriptionApproved : val));
+        setApproved((prev) => (isSubscriptionApproved ? isSubscriptionApproved : (val || prev)));
+      }
+      if (e.key === 'hasActiveSubscription') {
+        const val = e.newValue === 'true';
+        setApproved((prev) => (isSubscriptionApproved ? isSubscriptionApproved : (val || prev)));
       }
       if (e.key === 'trialExpired') {
         setTrialExpired(e.newValue === 'true');
+      }
+      if (e.key === 'allowedSections') {
+        try {
+          setAllowedSections(e.newValue ? JSON.parse(e.newValue) : null);
+        } catch { setAllowedSections(null); }
       }
     };
     window.addEventListener('storage', onStorage);
@@ -66,13 +92,13 @@ export const TeacherSidebar = ({ className, isSubscriptionApproved = false }: Te
       id: 'dashboard',
       label: language === 'ar' ? 'لوحة التحكم' : 'Dashboard',
       icon: Home,
-      href: '/teacher'
+      href: '/teacher-dashboard'
     },
     {
       id: 'my-courses',
       label: language === 'ar' ? 'دوراتي' : 'My Courses',
       icon: BookOpen,
-      href: '/teacher/courses'
+      href: '/teacher-dashboard/courses'
     },
     {
       id: 'assessments',
@@ -84,26 +110,26 @@ export const TeacherSidebar = ({ className, isSubscriptionApproved = false }: Te
       id: 'create-course',
       label: language === 'ar' ? 'إنشاء كورس' : 'Create Course',
       icon: Plus,
-      href: '/teacher/create-course'
+      href: '/teacher-dashboard/create-course'
     },
     {
       id: 'invite-students',
       label: language === 'ar' ? 'ادارة وتخصيص المنصة' : 'Platform Management and Customization',
       icon: Settings,
-      href: '/teacher/invite-students'
+      href: '/teacher-dashboard/invite-students'
     },
     {
       id: 'payouts',
       label: language === 'ar' ? 'المدفوعات' : 'Payouts',
       icon: DollarSign,
-      href: '/teacher/payouts'
+      href: '/teacher-dashboard/payouts'
     },
     
   ];
 
   const isActive = (href: string) => {
-    if (href === '/teacher') {
-      return location.pathname === '/teacher' || location.pathname === '/teacher/';
+    if (href === '/teacher-dashboard') {
+      return location.pathname === '/teacher-dashboard' || location.pathname === '/teacher-dashboard/';
     }
     return location.pathname.startsWith(href);
   };
@@ -178,8 +204,10 @@ export const TeacherSidebar = ({ className, isSubscriptionApproved = false }: Te
             {sidebarItems.map((item) => {
               const Icon = item.icon;
               const active = isActive(item.href);
-              // Lock only if trial has expired AND subscription not approved
-              const locked = (!approved && trialExpired) && item.id !== 'dashboard';
+              // Lock only when trial expired and subscription not approved.
+              // With approved subscription, unlock all sidebar pages similar to trial.
+              const expiredAndNotApproved = (!approved && trialExpired);
+              const locked = expiredAndNotApproved && item.id !== 'dashboard';
               // Always navigate to intended href; rely on ProtectedRoute for gating/redirect
               const targetHref = item.href;
 

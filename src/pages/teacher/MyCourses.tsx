@@ -42,6 +42,7 @@ import { Trash } from "lucide-react";
 import { VideoService } from "@/services/videoService";
 import { StudentService } from "@/services/studentService";
 import { TeacherService } from "@/services/teacherService";
+import { isSectionAllowed } from "@/utils/access";
 
 interface Course {
   id: string;
@@ -408,18 +409,21 @@ const teacherName = user?.displayName || (language === 'ar' ? 'مدرس جديد
                 }
               </p>
             </div>
-            <Link to="/teacher/create-course">
-              <Button 
-                className="bg-[#ee7b3d] hover:bg-[#d66a2c] text-white px-6 py-3 rounded-lg font-medium"
-                size="lg"
-              >
-                <Plus className="h-5 w-5 mr-2" />
-                {language === 'ar' ? 'إنشاء دورة جديدة' : 'Create New Course'}
-              </Button>
-            </Link>
+            {isSectionAllowed('my-courses','create-button') && (
+              <Link to="/teacher/create-course">
+                <Button 
+                  className="bg-[#ee7b3d] hover:bg-[#d66a2c] text-white px-6 py-3 rounded-lg font-medium"
+                  size="lg"
+                >
+                  <Plus className="h-5 w-5 mr-2" />
+                  {language === 'ar' ? 'إنشاء دورة جديدة' : 'Create New Course'}
+                </Button>
+              </Link>
+            )}
           </div>
 
           {/* Stats Cards */}
+          {isSectionAllowed('my-courses','stats-cards') && (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
             <Card className="bg-white border-0 shadow-sm">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -453,6 +457,7 @@ const teacherName = user?.displayName || (language === 'ar' ? 'مدرس جديد
 
             
           </div>
+          )}
 
           {/* Search and Filters */}
           <Card className="bg-white border-0 shadow-sm mb-6">
@@ -504,7 +509,7 @@ const teacherName = user?.displayName || (language === 'ar' ? 'مدرس جديد
                 {language === 'ar' ? 'جارٍ تحميل الدورات...' : 'Loading courses...'}
               </span>
             </div>
-          ) : (
+          ) : isSectionAllowed('my-courses','courses-list') ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
               {filteredCourses.map((course) => (
               <Card key={course.id} className="bg-white border-0 shadow-sm hover:shadow-md transition-shadow">
@@ -586,6 +591,10 @@ const teacherName = user?.displayName || (language === 'ar' ? 'مدرس جديد
                 </CardContent>
               </Card>
               ))}
+            </div>
+          ) : (
+            <div className="text-center text-gray-500 py-12">
+              {language === 'ar' ? 'هذه الباقة لا تسمح بعرض قائمة الدورات' : 'Your plan does not allow viewing the courses list'}
             </div>
           )}
 

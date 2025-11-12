@@ -21,6 +21,7 @@ import {
   ArrowLeft,
   Image
 } from "lucide-react";
+import { isSectionAllowed } from "@/utils/access";
 
 // Removed local Lesson interface since lessons UI is removed
 
@@ -284,6 +285,7 @@ export const TeacherCreateCourse = () => {
 
           <form onSubmit={handleSubmit} className="space-y-8">
             {/* Course Basic Information */}
+            {isSectionAllowed('create-course','basic-info') ? (
             <Card className="bg-white border-0 shadow-sm">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-[#2c4656]">
@@ -459,6 +461,16 @@ export const TeacherCreateCourse = () => {
               </CardContent>
             </Card>
 
+            ) : (
+              <Card className="bg-white border-0 shadow-sm">
+                <CardHeader>
+                  <CardTitle className="text-[#2c4656]">
+                    {language === 'ar' ? 'هذه الباقة لا تسمح بتعديل معلومات الدورة' : 'Your plan does not allow editing basic info'}
+                  </CardTitle>
+                </CardHeader>
+              </Card>
+            )}
+
             {/* تم إزالة قسم دروس الدورة وزر إضافة درس. سيتم إضافة الدروس في صفحة مستقلة */}
 
             {/* Submit Button */}
@@ -471,30 +483,32 @@ export const TeacherCreateCourse = () => {
               >
                 {language === 'ar' ? 'إلغاء' : 'Cancel'}
               </Button>
-              <Button
-                type="submit"
-                disabled={
-                  isSubmitting ||
-                  !courseForm.title ||
-                  !courseForm.description ||
-                  !courseForm.category ||
-                  (!courseForm.isFree && !courseForm.price) ||
-                  ((courseForm.objectives || []).filter(o => o.trim() !== '').length === 0)
-                }
-                className="bg-[#ee7b3d] hover:bg-[#d66a2c] text-white px-8"
-              >
-                {isSubmitting ? (
-                  <>
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                    {language === 'ar' ? 'جاري الحفظ...' : 'Saving...'}
-                  </>
-                ) : (
-                  <>
-                    <Save className="h-4 w-4 mr-2" />
-                    {language === 'ar' ? 'إنشاء كورس' : 'Create Course'}
-                  </>
-                )}
-              </Button>
+              {isSectionAllowed('create-course','publish-controls') && (
+                <Button
+                  type="submit"
+                  disabled={
+                    isSubmitting ||
+                    !courseForm.title ||
+                    !courseForm.description ||
+                    !courseForm.category ||
+                    (!courseForm.isFree && !courseForm.price) ||
+                    ((courseForm.objectives || []).filter(o => o.trim() !== '').length === 0)
+                  }
+                  className="bg-[#ee7b3d] hover:bg-[#d66a2c] text-white px-8"
+                >
+                  {isSubmitting ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                      {language === 'ar' ? 'جاري الحفظ...' : 'Saving...'}
+                    </>
+                  ) : (
+                    <>
+                      <Save className="h-4 w-4 mr-2" />
+                      {language === 'ar' ? 'إنشاء كورس' : 'Create Course'}
+                    </>
+                  )}
+                </Button>
+              )}
             </div>
           </form>
         </main>

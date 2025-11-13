@@ -25,6 +25,7 @@ const TeacherRegister = () => {
     password: "",
     confirmPassword: "",
     subjectSpecialization: "",
+    phoneNumber: "",
   });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -96,6 +97,7 @@ const TeacherRegister = () => {
           fullName: formData.fullName,
           role: 'teacher',
           subjectSpecialization: formData.subjectSpecialization,
+          phoneNumber: formData.phoneNumber,
         });
         
         toast.success(language === 'ar' ? 'تم إنشاء الحساب وتم تسجيل الدخول تلقائيًا' : 'Account created and logged in automatically');
@@ -269,6 +271,20 @@ const TeacherRegister = () => {
                     {errors.confirmPassword}
                   </p>
                 )}
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="phoneNumber" className="text-sm font-medium">
+                  {t('teacherPhone')}
+                </Label>
+                <Input
+                  id="phoneNumber"
+                  name="phoneNumber"
+                  type="tel"
+                  placeholder={t('enterTeacherPhone')}
+                  value={formData.phoneNumber}
+                  onChange={handleChange}
+                />
               </div>
 
               <div className="space-y-2">

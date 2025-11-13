@@ -49,6 +49,8 @@ const translations = {
     selectSubject: 'اختر تخصصك الموضوعي',
     enterPaypalEmail: 'أدخل بريد PayPal الخاص بك',
     teacherSubscriptionNote: 'يجب على المعلمين الاشتراك لتفعيل نشر الدورات. ستتمكن من إعداد اشتراكك بعد إكمال التسجيل',
+    teacherPhone: 'رقم هاتف المدرس',
+    enterTeacherPhone: 'أدخل رقم هاتف المدرس',
     
     // Subject Specializations
     mathematics: 'الرياضيات',
@@ -238,6 +240,8 @@ const translations = {
     enterPaypalEmail: 'Enter your PayPal email',
     teacherSubscriptionNote: 'Important: Teachers must subscribe to activate course publishing. You\'ll be able to set up your subscription after completing registration.',
     registerAsTeacherButton: 'Register as Teacher',
+    teacherPhone: 'Teacher Phone',
+    enterTeacherPhone: 'Enter teacher phone number',
     
     // Subject Specializations
     mathematics: 'Mathematics',

@@ -199,3 +199,50 @@ All colors MUST be HSL.
 .pretty-scrollbar::-webkit-scrollbar-corner {
   background: transparent;
 }
+
+:root { --gradient-angle: 0deg; }
+
+@keyframes spin-gradient { to { --gradient-angle: 360deg; } }
+
+.gradient-border-flow {
+  border: 2px solid transparent;
+  background:
+    linear-gradient(transparent, transparent) padding-box,
+    conic-gradient(from var(--gradient-angle), hsl(var(--accent)), hsl(var(--primary)), hsl(var(--accent))) border-box;
+  animation: spin-gradient 6s linear infinite;
+  border-radius: var(--radius);
+}
+
+.premium-gradient-frame {
+  position: relative;
+  border-radius: var(--radius);
+  background: transparent;
+  isolation: isolate;
+}
+.premium-gradient-frame::after,
+.premium-gradient-frame::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  padding: 2px;
+  border-radius: inherit;
+  background: conic-gradient(
+    from var(--gradient-angle),
+    hsl(217 91% 60%), /* blue */
+    hsl(267 85% 60%), /* purple */
+    hsl(354 70% 54%), /* red */
+    hsl(217 91% 60%)
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: spin-gradient 4s linear infinite;
+  pointer-events: none;
+  z-index: 0;
+}
+.premium-gradient-frame::before {
+  filter: blur(8px);
+  opacity: 0.6;
+}
+
+.dir-rtl { direction: rtl !important; text-align: right !important; }

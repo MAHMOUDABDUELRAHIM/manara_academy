@@ -41,6 +41,7 @@ export interface TeacherProfile {
   uid: string;
   fullName: string;
   email: string;
+  phoneNumber?: string;
   subjectSpecialization?: string;
   bio?: string;
   photoURL?: string;
@@ -70,13 +71,15 @@ export class TeacherService {
     uid: string, 
     fullName: string, 
     email: string, 
-    subjectSpecialization?: string
+    subjectSpecialization?: string,
+    phoneNumber?: string
   ): Promise<TeacherProfile> {
     try {
       const teacherProfile: Omit<TeacherProfile, 'id'> = {
         uid,
         fullName,
         email,
+        phoneNumber: (phoneNumber || '').toString().trim(),
         // Firestore لا يقبل undefined؛ نضمن قيمة سلسلة بدلًا من undefined
         subjectSpecialization: subjectSpecialization || '',
         photoURL: '',

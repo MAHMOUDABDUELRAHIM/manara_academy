@@ -14,7 +14,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useAuth } from "@/hooks/useAuth";
-import { Bell, LogOut, Settings, Crown } from "lucide-react";
+import { Bell, LogOut, Settings, Crown, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import { Progress } from "@/components/ui/progress";
 import { TeacherService } from "@/services/teacherService";
@@ -36,6 +36,7 @@ export const DashboardHeader = ({
   const location = useLocation();
   const navigate = useNavigate();
   const [showNotifications, setShowNotifications] = useState(false);
+  const [planOpen, setPlanOpen] = useState(false);
   // Ticking clock for live countdowns
   const [nowTick, setNowTick] = useState<number>(Date.now());
   useEffect(() => {
@@ -49,6 +50,7 @@ export const DashboardHeader = ({
   const [hasActiveSubscription, setHasActiveSubscription] = useState<boolean>(() => {
     try { return localStorage.getItem('hasActiveSubscription') === 'true'; } catch { return false; }
   });
+  const [hadApprovedSubscription, setHadApprovedSubscription] = useState<boolean>(false);
 
   // Trial period logic for teachers: 24h countdown based on account creation
   const createdRaw: any = user?.profile?.createdAt as any;
@@ -106,6 +108,7 @@ export const DashboardHeader = ({
             .filter(p => p?.status === 'approved')
             .sort((a, b) => ((b?.createdAt?.seconds || 0) - (a?.createdAt?.seconds || 0)));
           const approvedP = approvedList[0];
+          try { setHadApprovedSubscription(approvedList.length > 0); } catch {}
           const expApproved = approvedP?.expiresAt?.toDate?.() || approvedP?.expiresAt || null;
           const validApproved = expApproved instanceof Date ? (Date.now() < expApproved.getTime()) : !!approvedP;
 
@@ -121,11 +124,11 @@ export const DashboardHeader = ({
             const rawPeriod: string = (pendingP?.period || '').toString().toLowerCase();
             let expiresMsFromCreated: number | null = null;
             const isYear = (
-              rawPeriod.includes('year') || rawPeriod.includes('annual') || rawPeriod.includes('سنوي') || rawPeriod.includes('سنة')
+              rawPeriod.includes('year') || rawPeriod.includes('annual') || rawPeriod.includes('سنوي') || rawPeriod.includes('سنة') || rawPeriod.includes('سنوية') || rawPeriod.includes('ثانوية')
             );
             const isHalfYear = (
               rawPeriod.includes('half') || rawPeriod.includes('semi') || rawPeriod.includes('semiannual') || rawPeriod.includes('semi-annual') ||
-              rawPeriod.includes('نصف') || rawPeriod.includes('نصف سنوي') || rawPeriod.includes('ستة أشهر') || rawPeriod.includes('6 اشهر') || rawPeriod.includes('6 أشهر')
+              rawPeriod.includes('نصف') || rawPeriod.includes('نصف سنوي') || rawPeriod.includes('نصف سنوية') || rawPeriod.includes('نصف ثانوية') || rawPeriod.includes('ستة أشهر') || rawPeriod.includes('6 اشهر') || rawPeriod.includes('6 أشهر')
             );
             const isMonth = (
               rawPeriod.includes('month') || rawPeriod.includes('monthly') || rawPeriod.includes('شهري') || rawPeriod.includes('شهر')
@@ -150,12 +153,12 @@ export const DashboardHeader = ({
             }
           }
 
-          const hasActive = !!validApproved;
+          const hasActive = !!validApproved || !!validPending;
           setHasActiveSubscription(hasActive);
           try { localStorage.setItem('hasActiveSubscription', hasActive ? 'true' : 'false'); } catch {}
 
           // Resolve plan name and expiry for countdown
-          const activePayment = validApproved ? approvedP : null;
+          const activePayment = validApproved ? approvedP : (validPending ? pendingP : null);
           if (activePayment) {
             const planId: string | undefined = activePayment?.planId;
             const planName: string | undefined = activePayment?.planName;
@@ -174,8 +177,8 @@ export const DashboardHeader = ({
               }
               const periodStr = (planDocData?.period || '').toString().toLowerCase();
               // Map to ms: month=30d, half-year=180d, year=365d, 5 minutes for testing
-              const isYear = periodStr.includes('year') || periodStr.includes('annual') || periodStr.includes('سنوي') || periodStr.includes('سنة');
-              const isHalfYear = periodStr.includes('half') || periodStr.includes('semi') || periodStr.includes('semiannual') || periodStr.includes('semi-annual') || periodStr.includes('نصف') || periodStr.includes('نصف سنوي');
+              const isYear = periodStr.includes('year') || periodStr.includes('annual') || periodStr.includes('سنوي') || periodStr.includes('سنة') || periodStr.includes('سنوية') || periodStr.includes('ثانوية');
+              const isHalfYear = periodStr.includes('half') || periodStr.includes('semi') || periodStr.includes('semiannual') || periodStr.includes('semi-annual') || periodStr.includes('نصف') || periodStr.includes('نصف سنوي') || periodStr.includes('نصف سنوية') || periodStr.includes('نصف ثانوية');
               const isMonth = periodStr.includes('month') || periodStr.includes('monthly') || periodStr.includes('شهري') || periodStr.includes('شهر');
               const isFiveMin = (periodStr.includes('5') && (periodStr.includes('minute') || periodStr.includes('minutes') || periodStr.includes('دقيقة') || periodStr.includes('دقائق')));
               if (isFiveMin) {
@@ -195,6 +198,8 @@ export const DashboardHeader = ({
             const expFromPayment = validApproved ? (expApproved instanceof Date ? expApproved : null) : null;
             if (expFromPayment instanceof Date) {
               expComputed = expFromPayment;
+            } else if (validPending && pendingExpiresAt instanceof Date) {
+              expComputed = pendingExpiresAt;
             } else if (planPeriodMs && planPeriodMs > 0) {
               const startDate = validApproved
                 ? (approvedP?.approvedAt?.toDate?.() || approvedP?.approvedAt || approvedP?.createdAt?.toDate?.() || approvedP?.createdAt || null)
@@ -401,44 +406,56 @@ export const DashboardHeader = ({
 
           {/* Teacher active subscription: show plan and optional storage usage */}
           {user?.role === 'teacher' && hasActiveSubscription ? (
-            <div className="order-3 hidden md:flex flex-col gap-1 border px-4 py-2 whitespace-nowrap rounded-none bg-primary/5 ring-1 ring-primary/40 shadow-lg animate-pulse">
-              <div className="flex items-center gap-2 text-sm">
-                <span className="font-semibold">
-                  {language === 'ar' ? 'الخطة:' : 'Plan:'}
+            <div className="order-3 hidden md:flex relative items-center gap-3 premium-gradient-frame rounded-full px-4 py-2 text-base whitespace-nowrap bg-transparent dir-rtl">
+              <div className="relative z-10 flex items-center gap-2">
+                <span className="text-sm font-semibold">
+                  {language === 'ar' ? 'باقة ' : 'Plan '}
+                  {approvedPlanName || (language === 'ar' ? 'نشطة' : 'Active')}
                 </span>
-                <Badge variant="outline" className="rounded-none">
-                  {approvedPlanName || (language === 'ar' ? 'باقة نشطة' : 'Active Plan')}
-                </Badge>
-                <span className="text-muted-foreground text-xs">
-                  {language === 'ar' ? 'استخدام التخزين' : 'Storage usage'}
-                </span>
+                <button
+                  type="button"
+                  className="inline-flex items-center justify-center h-5 w-5 rounded-sm hover:bg-primary/10"
+                  onClick={() => setPlanOpen((v) => !v)}
+                >
+                  <ChevronDown className={`h-4 w-4 transition-transform ${planOpen ? 'rotate-180' : ''}`} />
+                </button>
               </div>
-              {subExpiresMs > 0 && (
-                <div className="text-xs text-muted-foreground">
-                  {language === 'ar' ? 'ينتهي الاشتراك بعد: ' : 'Subscription ends in: '}
-                  <span className="font-mono">
-                    {subDays}d {subHours}h {subMinutes}m {subSeconds}s
-                  </span>
+              {planOpen && (
+                <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1 border border-border rounded-md bg-card shadow-lg p-3 text-sm z-20 dir-rtl w-max">
+                  {subExpiresMs > 0 && (() => {
+                    try {
+                      const locale = language === 'ar' ? 'ar-EG' : 'en-US';
+                      const dateStr = new Date(subExpiresMs).toLocaleDateString(locale, { year: 'numeric', month: 'long', day: 'numeric' });
+                      return (
+                        <div className="text-xs text-muted-foreground">
+                          {language === 'ar' ? 'التجديد القادم: ' : 'Next renewal: '}
+                          <span className="font-semibold">{dateStr}</span>
+                        </div>
+                      );
+                    } catch {
+                      return null;
+                    }
+                  })()}
+                  {approvedStorageGB && approvedStorageGB > 0 && (() => {
+                    const usedGB = storageUsedBytes / (1024 * 1024 * 1024);
+                    const pct = Math.min(100, Math.max(0, (usedGB / approvedStorageGB) * 100));
+                    const label = `${usedGB.toFixed(2)} / ${approvedStorageGB} GB`;
+                    return (
+                      <div className="mt-2">
+                        <div className="text-[10px] text-muted-foreground mb-1 text-right">{label}</div>
+                        <div className="min-w-[140px] w-[220px]">
+                          <Progress value={pct} className="rounded-none h-2" />
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
-              {approvedStorageGB && approvedStorageGB > 0 && (() => {
-                const usedGB = storageUsedBytes / (1024 * 1024 * 1024);
-                const pct = Math.min(100, Math.max(0, (usedGB / approvedStorageGB) * 100));
-                const label = `${usedGB.toFixed(2)} / ${approvedStorageGB} GB`;
-                return (
-                  <div className="flex items-center gap-3">
-                    <div className="min-w-[160px] w-[200px]">
-                      <Progress value={pct} className="rounded-none" />
-                    </div>
-                    <span className="text-xs text-muted-foreground">{label}</span>
-                  </div>
-                );
-              })()}
             </div>
           ) : (
             /* Teacher trial badge / CTA when not approved */
             user?.role === 'teacher' && !!createdMs && (
-              (!trialExpired && !hasActiveSubscription) ? (
+              (!trialExpired && !hasActiveSubscription && !hadApprovedSubscription) ? (
                 <div className="order-3 hidden md:flex items-center border border-border rounded-md px-3 py-1 text-sm whitespace-nowrap">
                   {language === 'ar'
                     ? `انت علي الفترة التجريبية متبقي (${remainingCount}) ${trialCfg?.unit === 'minutes' ? 'دقيقة' : 'يوم'}`
@@ -447,9 +464,13 @@ export const DashboardHeader = ({
               ) : (
                 <div className="order-3 hidden md:flex items-center gap-3 border border-border rounded-md px-3 py-1 text-sm whitespace-nowrap bg-accent/30">
                   <span>
-                    {language === 'ar'
-                      ? 'انتهت الفترة التجريبية — ارتقِ الآن واحصل على كل المزايا'
-                      : 'Trial ended — Upgrade now to unlock all features'}
+                    {hadApprovedSubscription
+                      ? (language === 'ar'
+                        ? 'انتهى اشتراكك — جدّد الآن لاستعادة مزايا الباقة'
+                        : 'Subscription expired — Renew now to regain plan features')
+                      : (language === 'ar'
+                        ? 'انتهت الفترة التجريبية — ارتقِ الآن واحصل على كل المزايا'
+                        : 'Trial ended — Upgrade now to unlock all features')}
                   </span>
                   <Button
                     size="sm"
@@ -459,7 +480,9 @@ export const DashboardHeader = ({
                     onClick={handleUpgradeClick}
                   >
                     <Crown className="h-3.5 w-3.5 mr-1" />
-                    {language === 'ar' ? 'الترقية الآن' : 'Upgrade now'}
+                    {hadApprovedSubscription
+                      ? (language === 'ar' ? 'التجديد الآن' : 'Renew now')
+                      : (language === 'ar' ? 'الترقية الآن' : 'Upgrade now')}
                   </Button>
                 </div>
               )

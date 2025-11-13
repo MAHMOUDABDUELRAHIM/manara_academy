@@ -25,6 +25,7 @@ interface UserProfile {
   status?: string;
   parentPhone?: string;
   studentPhone?: string;
+  phoneNumber?: string;
   emailVerified?: boolean;
   // Added to support trial period logic for teachers
   createdAt?: string;
@@ -288,7 +289,8 @@ export const useAuth = () => {
               result.user.uid,
               userProfile.fullName || '',
               result.user.email || '',
-              userProfile.subjectSpecialization
+              userProfile.subjectSpecialization,
+              userProfile.phoneNumber
             );
           } catch (createErr) {
             console.error('Non-critical: failed to create teacher profile:', createErr);

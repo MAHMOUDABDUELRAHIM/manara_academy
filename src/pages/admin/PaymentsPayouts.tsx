@@ -43,12 +43,12 @@ import {
   Calendar,
   User,
   BookOpen,
-  TrendingUp,
   Download
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { auth, db } from '@/firebase/config';
 import { doc, onSnapshot, setDoc, serverTimestamp, collection, query, orderBy, updateDoc, getDoc, where, getDocs } from 'firebase/firestore';
+import { TeacherService } from '@/services/teacherService';
 
 interface AdminPayment {
   id: string;
@@ -61,10 +61,12 @@ interface AdminPayment {
   amount: number;
   currency?: 'USD' | 'EGP' | 'JOD';
   createdAt: string; // formatted
+  createdAtMs?: number; // for ordering
   status: 'pending' | 'approved' | 'rejected' | 'completed' | 'failed' | 'refunded';
   planId?: string;
   walletNumber?: string;
   receiptBase64?: string;
+  rawPeriod?: string;
 }
 
 interface PayoutRequest {
@@ -95,6 +97,7 @@ const PaymentsPayouts: React.FC = () => {
 
   // Payments from Firestore
   const [payments, setPayments] = useState<AdminPayment[]>([]);
+  const [teacherPhones, setTeacherPhones] = useState<Record<string, string>>({});
 
   // Mock payout requests data - will be replaced with real data from backend
   const [payoutRequests, setPayoutRequests] = useState<PayoutRequest[]>([]);
@@ -138,10 +141,12 @@ const PaymentsPayouts: React.FC = () => {
           amount: typeof data.amount === 'number' ? data.amount : 0,
           currency: data.currency,
           createdAt: formattedDate,
+          createdAtMs: ts.getTime(),
           status: (data.status as AdminPayment['status']) || 'pending',
           planId: data.planId,
           walletNumber: data.walletNumber,
           receiptBase64: data.receiptBase64,
+          rawPeriod: (data.period || ''),
         };
       });
       setPayments(rows);
@@ -151,6 +156,32 @@ const PaymentsPayouts: React.FC = () => {
     });
     return () => unsub();
   }, [language]);
+
+  useEffect(() => {
+    const ids = Array.from(new Set(payments.map((p) => p.teacher?.id).filter((id) => id && id !== '—')));
+    const toFetch = ids.filter((id) => !(id in teacherPhones));
+    if (toFetch.length === 0) return;
+    (async () => {
+      try {
+        const results = await Promise.all(toFetch.map(async (id) => {
+          try {
+            const tp = await TeacherService.getTeacherProfile(id!);
+            const phone = (tp?.phoneNumber || '').toString().trim();
+            return { id: id!, phone };
+          } catch {
+            return { id: id!, phone: '' };
+          }
+        }));
+        setTeacherPhones((prev) => {
+          const next = { ...prev };
+          results.forEach(({ id, phone }) => {
+            if (phone) next[id] = phone;
+          });
+          return next;
+        });
+      } catch {}
+    })();
+  }, [payments]);
 
   const validateWallet = (raw: string) => {
     // Allow digits, spaces, dashes, leading +; normalize to digits with optional leading +
@@ -354,10 +385,55 @@ const PaymentsPayouts: React.FC = () => {
     return isApproved && matchesSearch;
   });
 
-  // Calculate totals - will be fetched from backend
-  const totalPayments = 0;
-  const totalPayouts = 0;
-  const pendingPayouts = 0;
+  // Calculate real total payments (approved only)
+  const totalPayments = payments
+    .filter((p) => p.status === 'approved')
+    .reduce((sum, p) => sum + (typeof p.amount === 'number' ? p.amount : 0), 0);
+
+  // Helper to normalize period label to Arabic/English
+  const labelPeriod = (raw?: string) => {
+    const s = (raw || '').toString().toLowerCase();
+    if (!s) return language === 'ar' ? 'غير محدد' : 'Unspecified';
+    const isFive = s.includes('5') && (s.includes('minute') || s.includes('minutes') || s.includes('دقيقة') || s.includes('دقائق'));
+    const isMonth = s.includes('month') || s.includes('monthly') || s.includes('شهري') || s.includes('شهر');
+    const isHalf = s.includes('half') || s.includes('semi') || s.includes('semiannual') || s.includes('semi-annual') || s.includes('نصف') || s.includes('نصف سنوي');
+    const isYear = s.includes('year') || s.includes('annual') || s.includes('سنوي') || s.includes('سنة');
+    if (isFive) return language === 'ar' ? '5 دقائق' : '5 minutes';
+    if (isYear) return language === 'ar' ? 'سنوي' : 'Yearly';
+    if (isHalf) return language === 'ar' ? 'نصف سنوي' : 'Half-Year';
+    if (isMonth) return language === 'ar' ? 'شهري' : 'Monthly';
+    return raw || (language === 'ar' ? 'غير محدد' : 'Unspecified');
+  };
+
+  const renewalAccounts = (() => {
+    const byTeacher: Record<string, { teacher: AdminPayment['teacher']; payments: AdminPayment[] }> = {};
+    payments.forEach((p) => {
+      const tId = p.teacher?.id;
+      if (!tId || tId === '—') return;
+      if (!byTeacher[tId]) byTeacher[tId] = { teacher: p.teacher, payments: [] };
+      byTeacher[tId].payments.push(p);
+    });
+    const list = Object.values(byTeacher)
+      .map((e) => {
+        const sorted = e.payments.slice().sort((a, b) => ((a.createdAtMs || 0) - (b.createdAtMs || 0)));
+        const approvedSorted = sorted.filter((x) => x.status === 'approved');
+        if (approvedSorted.length === 0) return null;
+        const firstApproved = approvedSorted[0];
+        const renewals = sorted.filter((x) => {
+          const isRenewalStatus = x.status === 'approved' || x.status === 'pending' || x.status === 'rejected';
+          const afterFirst = (x.createdAtMs || 0) > (firstApproved.createdAtMs || 0);
+          return isRenewalStatus && afterFirst;
+        });
+        if (renewals.length === 0) return null;
+        const periods = approvedSorted.map((x) => labelPeriod(x.rawPeriod));
+        const renewalsCount = renewals.length;
+        const latestRenewal = renewals.slice().sort((a, b) => ((b.createdAtMs || 0) - (a.createdAtMs || 0)))[0];
+        const latestRenewalPeriod = labelPeriod(latestRenewal?.rawPeriod);
+        return { teacher: e.teacher, renewalsCount, periods, latestRenewal, latestRenewalPeriod };
+      })
+      .filter(Boolean) as { teacher: AdminPayment['teacher']; renewalsCount: number; periods: string[]; latestRenewal?: AdminPayment; latestRenewalPeriod?: string }[];
+    return list;
+  })();
 
   return (
     <div className="min-h-screen bg-background">
@@ -381,8 +457,8 @@ const PaymentsPayouts: React.FC = () => {
             </p>
           </div>
 
-          {/* Stats Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+          {/* Stats Card: Total Payments only */}
+          <div className="grid grid-cols-1 md:grid-cols-1 gap-6 mb-8">
             <Card>
               <CardContent className="p-6">
                 <div className="flex items-center justify-between">
@@ -396,55 +472,19 @@ const PaymentsPayouts: React.FC = () => {
                 </div>
               </CardContent>
             </Card>
-            <Card>
-              <CardContent className="p-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-muted-foreground">
-                      {language === 'ar' ? 'إجمالي الأرباح المدفوعة' : 'Total Payouts'}
-                    </p>
-                    <p className="text-2xl font-bold">${totalPayouts.toLocaleString()}</p>
-                  </div>
-                  <TrendingUp className="h-8 w-8 text-blue-600" />
-                </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-muted-foreground">
-                      {language === 'ar' ? 'طلبات السحب المعلقة' : 'Pending Payouts'}
-                    </p>
-                    <p className="text-2xl font-bold">{pendingPayouts}</p>
-                  </div>
-                  <Calendar className="h-8 w-8 text-orange-600" />
-                </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-muted-foreground">
-                      {language === 'ar' ? 'صافي الربح' : 'Net Revenue'}
-                    </p>
-                    <p className="text-2xl font-bold">${(totalPayments - totalPayouts).toLocaleString()}</p>
-                  </div>
-                  <DollarSign className="h-8 w-8 text-purple-600" />
-                </div>
-              </CardContent>
-            </Card>
           </div>
 
-          {/* Tabs for Payments and Payouts */}
+          {/* Tabs for Payments, Approved, and Renewals */}
           <Tabs defaultValue="payments" className="space-y-6">
-            <TabsList className="grid w-full grid-cols-2">
+            <TabsList className="grid w-full grid-cols-3">
               <TabsTrigger value="payments">
                 {language === 'ar' ? 'المدفوعات' : 'Payments'}
               </TabsTrigger>
-              <TabsTrigger value="payouts">
+              <TabsTrigger value="approved">
                 {language === 'ar' ? 'المدفوعات المقبولة' : 'Approved Payments'}
+              </TabsTrigger>
+              <TabsTrigger value="renewals">
+                {language === 'ar' ? 'طلبات التجديد' : 'Renewal Requests'}
               </TabsTrigger>
             </TabsList>
 
@@ -560,6 +600,7 @@ const PaymentsPayouts: React.FC = () => {
                                 </Avatar>
                                 <div>
                                   <div className="font-medium">{payment.teacher.name}</div>
+                                  <div className="text-sm text-muted-foreground">{teacherPhones[payment.teacher.id] || '—'}</div>
                                   <div className="text-sm text-muted-foreground">{payment.teacher.email}</div>
                                 </div>
                               </div>
@@ -647,8 +688,8 @@ const PaymentsPayouts: React.FC = () => {
               </Card>
             </TabsContent>
 
-            {/* Payouts Tab */}
-            <TabsContent value="payouts" className="space-y-6">
+            {/* Approved Tab */}
+            <TabsContent value="approved" className="space-y-6">
               {/* Filters */}
               <Card>
                 <CardHeader>
@@ -670,12 +711,9 @@ const PaymentsPayouts: React.FC = () => {
                         />
                       </div>
                     </div>
-                    
                   </div>
                 </CardContent>
               </Card>
-
-              {/* Payouts Table */}
               <Card>
                 <CardHeader>
                   <CardTitle>
@@ -708,6 +746,7 @@ const PaymentsPayouts: React.FC = () => {
                                 </Avatar>
                                 <div>
                                   <div className="font-medium">{payment.teacher.name}</div>
+                                  <div className="text-sm text-muted-foreground">{teacherPhones[payment.teacher.id] || '—'}</div>
                                   <div className="text-sm text-muted-foreground">{payment.teacher.email}</div>
                                 </div>
                               </div>
@@ -746,6 +785,96 @@ const PaymentsPayouts: React.FC = () => {
                                 </Dialog>
                               ) : (
                                 <span className="text-muted-foreground">-</span>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            {/* Renewals Tab */}
+            <TabsContent value="renewals" className="space-y-6">
+              {/* Filters */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Filter className="h-5 w-5" />
+                    {language === 'ar' ? 'البحث والتصفية' : 'Search & Filter'}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex flex-col md:flex-row gap-4">
+                    <div className="flex-1">
+                      <div className="relative">
+                        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                        <Input
+                          placeholder={language === 'ar' ? 'البحث بالمدرس...' : 'Search by teacher...'}
+                          value={searchTerm}
+                          onChange={(e) => setSearchTerm(e.target.value)}
+                          className="pl-10"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>
+                    {language === 'ar' ? `طلبات التجديد (${renewalAccounts.length})` : `Renewal Requests (${renewalAccounts.length})`}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>{language === 'ar' ? 'المدرس' : 'Teacher'}</TableHead>
+                          <TableHead>{language === 'ar' ? 'عدد مرات التجديد' : 'Renewals Count'}</TableHead>
+                          <TableHead>{language === 'ar' ? 'أنواع التجديدات' : 'Renewal Types'}</TableHead>
+                          <TableHead>{language === 'ar' ? 'أحدث تجديد' : 'Latest Renewal'}</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {renewalAccounts.map((acc, idx) => (
+                          <TableRow key={acc.teacher.id + '_' + idx}>
+                            <TableCell>
+                              <div className="flex items-center gap-3">
+                                <Avatar className="h-8 w-8">
+                                  <AvatarFallback className="bg-primary/10 text-primary text-sm">
+                                    {acc.teacher.name.split(' ').map(n => n[0]).join('')}
+                                  </AvatarFallback>
+                                </Avatar>
+                                <div>
+                                  <div className="font-medium">{acc.teacher.name}</div>
+                                  <div className="text-sm text-muted-foreground">{teacherPhones[acc.teacher.id] || '—'}</div>
+                                  <div className="text-sm text-muted-foreground">{acc.teacher.email}</div>
+                                </div>
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant="outline">{acc.renewalsCount}</Badge>
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex flex-wrap gap-1">
+                                {acc.periods.map((p, i) => (
+                                  <Badge key={i} variant="secondary" className="rounded-none">{p}</Badge>
+                                ))}
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              {acc.latestRenewal ? (
+                                <div className="flex items-center gap-2">
+                                  {getPaymentStatusBadge(acc.latestRenewal.status)}
+                                  <Badge variant="outline">{acc.latestRenewalPeriod}</Badge>
+                                </div>
+                              ) : (
+                                <span className="text-muted-foreground">—</span>
                               )}
                             </TableCell>
                           </TableRow>

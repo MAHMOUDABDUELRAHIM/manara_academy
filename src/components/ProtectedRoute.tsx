@@ -300,9 +300,9 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, requiredRole,
       '/teacher-dashboard/payouts',
       '/teacher-dashboard/assessments',
     ];
-    const tryingSubRestricted = subscriptionRestrictedPaths.some((p) => location.pathname.startsWith(p));
-    if (tryingSubRestricted) {
-      if (subLoading) {
+  const tryingSubRestricted = subscriptionRestrictedPaths.some((p) => location.pathname.startsWith(p));
+  if (tryingSubRestricted) {
+    if (subLoading) {
         return (
           <div className="min-h-screen flex items-center justify-center">
             <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-accent"></div>
@@ -313,7 +313,15 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, requiredRole,
       let trialActive = false;
       try { trialActive = localStorage.getItem('trialActive') === 'true'; } catch {}
       if (!isSubApproved && !trialActive) {
-        return <Navigate to={`/teacher-dashboard?blocked=subscription#pricing`} replace />;
+        let allowDueToStorageWarning = false;
+        try {
+          const storageWarn = localStorage.getItem('storageWarningOnly') === 'true';
+          const hadApproved = localStorage.getItem('hadApprovedSubscription') === 'true';
+          allowDueToStorageWarning = !!storageWarn && !!hadApproved;
+        } catch {}
+        if (!allowDueToStorageWarning) {
+          return <Navigate to={`/teacher-dashboard?blocked=subscription#pricing`} replace />;
+        }
       }
 
       // Treat approved subscription like active trial: allow all teacher pages

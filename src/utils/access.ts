@@ -20,8 +20,10 @@ export function isFeatureAllowed(featureId: string): boolean {
     approved = localStorage.getItem('isSubscriptionApproved') === 'true';
     trialActive = localStorage.getItem('trialActive') === 'true';
   } catch {}
-  // During trial or when not approved (trial gating handled elsewhere), do not block sections here
-  if (!approved || trialActive) return true;
+  // If subscription is approved, allow the feature without per-plan section gating
+  if (approved) return true;
+  // During trial, do not block sections here
+  if (trialActive) return true;
   const allowed = readAllowedSections();
   const sections = allowed[featureId] || [];
   return Array.isArray(sections) && sections.length > 0;
@@ -34,7 +36,10 @@ export function isSectionAllowed(featureId: string, sectionId: string): boolean 
     approved = localStorage.getItem('isSubscriptionApproved') === 'true';
     trialActive = localStorage.getItem('trialActive') === 'true';
   } catch {}
-  if (!approved || trialActive) return true;
+  // If subscription is approved, allow the section without per-plan gating
+  if (approved) return true;
+  // During trial, allow access
+  if (trialActive) return true;
   const allowed = readAllowedSections();
   const sections = allowed[featureId] || [];
   return Array.isArray(sections) && sections.includes(sectionId);

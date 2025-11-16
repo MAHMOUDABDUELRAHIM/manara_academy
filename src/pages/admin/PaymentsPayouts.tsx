@@ -47,6 +47,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { auth, db } from '@/firebase/config';
+import { StorageService } from '@/services/storageService';
 import { doc, onSnapshot, setDoc, serverTimestamp, collection, query, orderBy, updateDoc, getDoc, where, getDocs } from 'firebase/firestore';
 import { TeacherService } from '@/services/teacherService';
 
@@ -67,6 +68,9 @@ interface AdminPayment {
   walletNumber?: string;
   receiptBase64?: string;
   rawPeriod?: string;
+  extendedByDays?: number;
+  type?: string;
+  addonGB?: number;
 }
 
 interface PayoutRequest {
@@ -91,7 +95,7 @@ interface PayoutRequest {
 const PaymentsPayouts: React.FC = () => {
   const { language } = useLanguage();
   const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [statusFilter, setStatusFilter] = useState<string>('pending');
   const [dateFilter, setDateFilter] = useState<string>('all');
   const [selectedPayout, setSelectedPayout] = useState<PayoutRequest | null>(null);
 
@@ -147,6 +151,9 @@ const PaymentsPayouts: React.FC = () => {
           walletNumber: data.walletNumber,
           receiptBase64: data.receiptBase64,
           rawPeriod: (data.period || ''),
+          extendedByDays: typeof data.extendedByDays === 'number' ? data.extendedByDays : 0,
+          type: data.type,
+          addonGB: typeof data.addonGB === 'number' ? data.addonGB : undefined,
         };
       });
       setPayments(rows);
@@ -231,6 +238,7 @@ const PaymentsPayouts: React.FC = () => {
       const pRef = doc(db, 'payments', paymentId);
       const pSnap = await getDoc(pRef);
       const pdata: any = pSnap.exists() ? pSnap.data() : {};
+      const teacherId: string | undefined = typeof pdata?.teacherId === 'string' ? pdata.teacherId : undefined;
       let planDocData: any = null;
       const planId: string | undefined = typeof pdata?.planId === 'string' ? pdata.planId : undefined;
       const planName: string | undefined = typeof pdata?.planName === 'string' ? pdata.planName : undefined;
@@ -289,6 +297,18 @@ const PaymentsPayouts: React.FC = () => {
         approvedPeriodDays: Math.round(periodMs / (24 * 60 * 60 * 1000)),
         expiresAt: expiresDate,
       });
+      try {
+        if (teacherId) {
+          const usedBytes = await StorageService.getTeacherStorageUsageBytes(teacherId);
+          await updateDoc(doc(db, 'teachers', teacherId), {
+            usageBaselineBytes: usedBytes,
+            usageResetAt: new Date().toISOString(),
+            s3UsageBytes: 0,
+            extraStorageGB: 0,
+            updatedAt: new Date().toISOString(),
+          });
+        }
+      } catch {}
       toast.success(language === 'ar' ? 'تم قبول الدفع وتم تحديد انتهاء الاشتراك.' : 'Payment approved and subscription expiry set.');
     } catch (e) {
       console.error('Failed to approve payment:', e);
@@ -307,6 +327,41 @@ const PaymentsPayouts: React.FC = () => {
     } catch (e) {
       console.error('Failed to reject payment:', e);
       toast.error(language === 'ar' ? 'تعذر رفض الدفع.' : 'Failed to reject payment.');
+    }
+  };
+
+  const handleApproveStorageAddon = async (paymentId: string) => {
+    try {
+      const pRef = doc(db, 'payments', paymentId);
+      const pSnap = await getDoc(pRef);
+      const pdata: any = pSnap.exists() ? pSnap.data() : {};
+      const teacherId: string | undefined = pdata?.teacherId;
+      const addonGB: number = typeof pdata?.addonGB === 'number' ? pdata.addonGB : 0;
+      if (!teacherId || !addonGB || addonGB <= 0) {
+        toast.error(language === 'ar' ? 'بيانات الطلب غير مكتملة.' : 'Request data incomplete.');
+        return;
+      }
+      const tRef = doc(db, 'teachers', teacherId);
+      const tSnap = await getDoc(tRef);
+      const tdata: any = tSnap.exists() ? tSnap.data() : {};
+      const currentExtra: number = typeof tdata?.extraStorageGB === 'number' ? tdata.extraStorageGB : 0;
+      const nextExtra = currentExtra + addonGB;
+      await updateDoc(tRef, { extraStorageGB: nextExtra, updatedAt: new Date().toISOString() });
+      await updateDoc(pRef, { status: 'approved', approvedAt: serverTimestamp(), approvedBy: auth.currentUser?.uid || null, approvedAddonGB: addonGB });
+      toast.success(language === 'ar' ? 'تمت الموافقة على المساحة الإضافية وزيادتها للمدرس.' : 'Storage add-on approved and applied to teacher.');
+    } catch (e) {
+      console.error('Approve storage add-on failed:', e);
+      toast.error(language === 'ar' ? 'تعذر الموافقة على المساحة الإضافية.' : 'Failed to approve storage add-on.');
+    }
+  };
+
+  const handleRejectStorageAddon = async (paymentId: string) => {
+    try {
+      await updateDoc(doc(db, 'payments', paymentId), { status: 'rejected', rejectedAt: serverTimestamp(), rejectedBy: auth.currentUser?.uid || null });
+      toast.success(language === 'ar' ? 'تم رفض طلب المساحة الإضافية.' : 'Storage add-on request rejected.');
+    } catch (e) {
+      console.error('Reject storage add-on failed:', e);
+      toast.error(language === 'ar' ? 'تعذر رفض الطلب.' : 'Failed to reject request.');
     }
   };
 
@@ -385,10 +440,163 @@ const PaymentsPayouts: React.FC = () => {
     return isApproved && matchesSearch;
   });
 
+  const rejectedPayments = payments.filter(payment => {
+    const isRejected = payment.status === 'rejected';
+    const matchesSearch = payment.teacher.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                          payment.teacher.email.toLowerCase().includes(searchTerm.toLowerCase());
+    return isRejected && matchesSearch;
+  });
+
+  const storageAddonRequests = payments.filter((p) => p.type === 'storage_addon');
+
   // Calculate real total payments (approved only)
   const totalPayments = payments
     .filter((p) => p.status === 'approved')
     .reduce((sum, p) => sum + (typeof p.amount === 'number' ? p.amount : 0), 0);
+
+  const [extensionDays, setExtensionDays] = useState<Record<string, number>>({});
+  const [extLoadingByTeacher, setExtLoadingByTeacher] = useState<Record<string, boolean>>({});
+  const [bulkPeriod, setBulkPeriod] = useState<'all' | 'monthly' | 'half' | 'year' | 'five'>('all');
+  const [bulkDays, setBulkDays] = useState<number>(0);
+  const [bulkLoading, setBulkLoading] = useState<boolean>(false);
+  const [cancelLoadingByTeacher, setCancelLoadingByTeacher] = useState<Record<string, boolean>>({});
+  const [cancelDialogOpenByTeacher, setCancelDialogOpenByTeacher] = useState<Record<string, boolean>>({});
+
+  const handleExtendExpiry = async (teacherId: string) => {
+    try {
+      const days = extensionDays[teacherId] || 0;
+      if (!days || days < 1) {
+        toast.error(language === 'ar' ? 'أدخل عدد الأيام (1 على الأقل)' : 'Enter number of days (at least 1)');
+        return;
+      }
+      setExtLoadingByTeacher(prev => ({ ...prev, [teacherId]: true }));
+      const q = query(collection(db, 'payments'), where('teacherId', '==', teacherId), where('status', '==', 'approved'));
+      const snap = await getDocs(q);
+      if (snap.empty) {
+        toast.error(language === 'ar' ? 'لا توجد مدفوعات مقبولة لهذا المدرس.' : 'No approved payments for this teacher.');
+        setExtLoadingByTeacher(prev => ({ ...prev, [teacherId]: false }));
+        return;
+      }
+      const docs = snap.docs.map(d => ({ id: d.id, data: d.data() as any }));
+      docs.sort((a, b) => {
+        const ae = a.data.expiresAt?.toDate?.()?.getTime?.() || a.data.expiresAt?.getTime?.() || 0;
+        const be = b.data.expiresAt?.toDate?.()?.getTime?.() || b.data.expiresAt?.getTime?.() || 0;
+        if (ae !== be) return be - ae;
+        const ac = a.data.createdAt?.seconds || 0;
+        const bc = b.data.createdAt?.seconds || 0;
+        return bc - ac;
+      });
+      const latest = docs[0];
+      const currentExp: Date | null = latest.data.expiresAt?.toDate?.() || latest.data.expiresAt || null;
+      const baseMs = currentExp instanceof Date ? currentExp.getTime() : Date.now();
+      const addMs = days * 24 * 60 * 60 * 1000;
+      const newExp = new Date(baseMs + addMs);
+      await updateDoc(doc(db, 'payments', latest.id), { expiresAt: newExp, extendedByDays: (latest.data.extendedByDays || 0) + days });
+      toast.success(language === 'ar' ? `تم تمديد الاشتراك ${days} يومًا.` : `Subscription extended by ${days} day(s).`);
+      setExtensionDays(prev => ({ ...prev, [teacherId]: 0 }));
+    } catch (e) {
+      console.error('Failed to extend subscription:', e);
+      toast.error(language === 'ar' ? 'تعذر تمديد الاشتراك.' : 'Failed to extend subscription.');
+    } finally {
+      setExtLoadingByTeacher(prev => ({ ...prev, [teacherId]: false }));
+    }
+  };
+
+  const handleCancelSubscription = async (teacherId: string) => {
+    try {
+      setCancelLoadingByTeacher(prev => ({ ...prev, [teacherId]: true }));
+      const q = query(collection(db, 'payments'), where('teacherId', '==', teacherId), where('status', '==', 'approved'));
+      const snap = await getDocs(q);
+      if (snap.empty) {
+        toast.error(language === 'ar' ? 'لا توجد مدفوعات مقبولة لهذا المدرس.' : 'No approved payments for this teacher.');
+        setCancelLoadingByTeacher(prev => ({ ...prev, [teacherId]: false }));
+        return;
+      }
+      const docs = snap.docs.map(d => ({ id: d.id, data: d.data() as any }));
+      docs.sort((a, b) => {
+        const ae = a.data.expiresAt?.toDate?.()?.getTime?.() || a.data.expiresAt?.getTime?.() || 0;
+        const be = b.data.expiresAt?.toDate?.()?.getTime?.() || b.data.expiresAt?.getTime?.() || 0;
+        if (ae !== be) return be - ae;
+        const ac = a.data.createdAt?.seconds || 0;
+        const bc = b.data.createdAt?.seconds || 0;
+        return bc - ac;
+      });
+      const latest = docs[0];
+      const now = new Date();
+      await updateDoc(doc(db, 'payments', latest.id), { expiresAt: now, cancelledAt: serverTimestamp(), status: 'rejected' });
+      try { await updateDoc(doc(db, 'teachers', teacherId), { extraStorageGB: 0, updatedAt: new Date().toISOString() }); } catch {}
+      toast.success(language === 'ar' ? 'تم إلغاء الاشتراك وتحويله إلى غير نشط.' : 'Subscription cancelled and set to inactive.');
+      setCancelDialogOpenByTeacher(prev => ({ ...prev, [teacherId]: false }));
+    } catch (e) {
+      console.error('Failed to cancel subscription:', e);
+      toast.error(language === 'ar' ? 'تعذر إلغاء الاشتراك.' : 'Failed to cancel subscription.');
+    } finally {
+      setCancelLoadingByTeacher(prev => ({ ...prev, [teacherId]: false }));
+    }
+  };
+
+  const classifyPeriodKey = (raw?: string) => {
+    const s = (raw || '').toString().toLowerCase();
+    if (!s) return 'all';
+    const isFive = s.includes('5') && (s.includes('minute') || s.includes('minutes') || s.includes('دقيقة') || s.includes('دقائق'));
+    const isMonth = s.includes('month') || s.includes('monthly') || s.includes('شهري') || s.includes('شهر');
+    const isHalf = s.includes('half') || s.includes('semi') || s.includes('semiannual') || s.includes('semi-annual') || s.includes('نصف') || s.includes('نصف سنوي');
+    const isYear = s.includes('year') || s.includes('annual') || s.includes('سنوي') || s.includes('سنة');
+    if (isFive) return 'five';
+    if (isYear) return 'year';
+    if (isHalf) return 'half';
+    if (isMonth) return 'monthly';
+    return 'all';
+  };
+
+  const handleExtendAll = async () => {
+    try {
+      if (!bulkDays || bulkDays < 1) {
+        toast.error(language === 'ar' ? 'أدخل عدد الأيام (1 على الأقل)' : 'Enter number of days (at least 1)');
+        return;
+      }
+      setBulkLoading(true);
+      const q = query(collection(db, 'payments'), where('status', '==', 'approved'));
+      const snap = await getDocs(q);
+      if (snap.empty) {
+        toast.error(language === 'ar' ? 'لا توجد مدفوعات مقبولة.' : 'No approved payments found.');
+        setBulkLoading(false);
+        return;
+      }
+      const rows = snap.docs.map(d => ({ id: d.id, data: d.data() as any }));
+      const byTeacher: Record<string, { id: string; data: any }> = {};
+      for (const r of rows) {
+        const tId = r.data.teacherId;
+        if (!tId) continue;
+        const exp = r.data.expiresAt?.toDate?.() || r.data.expiresAt || null;
+        const expMs = exp instanceof Date ? exp.getTime() : 0;
+        const cur = byTeacher[tId];
+        if (!cur) byTeacher[tId] = r; else {
+          const curExp = cur.data.expiresAt?.toDate?.() || cur.data.expiresAt || null;
+          const curMs = curExp instanceof Date ? curExp.getTime() : 0;
+          if (expMs >= curMs) byTeacher[tId] = r;
+        }
+      }
+      let count = 0;
+      for (const [tId, r] of Object.entries(byTeacher)) {
+        const key = classifyPeriodKey(r.data.period);
+        if (bulkPeriod !== 'all' && key !== bulkPeriod) continue;
+        const base = r.data.expiresAt?.toDate?.() || r.data.expiresAt || null;
+        const baseMs = base instanceof Date ? base.getTime() : Date.now();
+        const addMs = bulkDays * 24 * 60 * 60 * 1000;
+        const newExp = new Date(baseMs + addMs);
+        await updateDoc(doc(db, 'payments', r.id), { expiresAt: newExp, extendedByDays: (r.data.extendedByDays || 0) + bulkDays });
+        count++;
+      }
+      toast.success(language === 'ar' ? `تم تمديد الاشتراك لعدد ${count} حساب.` : `Extended subscription for ${count} account(s).`);
+      setBulkDays(0);
+    } catch (e) {
+      console.error('Failed to bulk extend:', e);
+      toast.error(language === 'ar' ? 'تعذر التمديد الجماعي.' : 'Failed to extend in bulk.');
+    } finally {
+      setBulkLoading(false);
+    }
+  };
 
   // Helper to normalize period label to Arabic/English
   const labelPeriod = (raw?: string) => {
@@ -476,15 +684,21 @@ const PaymentsPayouts: React.FC = () => {
 
           {/* Tabs for Payments, Approved, and Renewals */}
           <Tabs defaultValue="payments" className="space-y-6">
-            <TabsList className="grid w-full grid-cols-3">
+            <TabsList className="grid w-full grid-cols-5">
               <TabsTrigger value="payments">
                 {language === 'ar' ? 'المدفوعات' : 'Payments'}
               </TabsTrigger>
               <TabsTrigger value="approved">
                 {language === 'ar' ? 'المدفوعات المقبولة' : 'Approved Payments'}
               </TabsTrigger>
+              <TabsTrigger value="rejected">
+                {language === 'ar' ? 'اشتراكات مرفوضة' : 'Rejected Subscriptions'}
+              </TabsTrigger>
               <TabsTrigger value="renewals">
                 {language === 'ar' ? 'طلبات التجديد' : 'Renewal Requests'}
+              </TabsTrigger>
+              <TabsTrigger value="storage_addons">
+                {language === 'ar' ? 'طلبات زيادة المساحة' : 'Storage Add-ons'}
               </TabsTrigger>
             </TabsList>
 
@@ -716,6 +930,36 @@ const PaymentsPayouts: React.FC = () => {
               </Card>
               <Card>
                 <CardHeader>
+                  <CardTitle>{language === 'ar' ? 'تمديد جماعي للاشتراك' : 'Bulk Subscription Extension'}</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex flex-col md:flex-row items-end gap-3">
+                    <div className="flex flex-col">
+                      <span className="text-sm text-muted-foreground">{language === 'ar' ? 'نوع الاشتراك' : 'Subscription type'}</span>
+                      <select
+                        value={bulkPeriod}
+                        onChange={(e) => setBulkPeriod(e.target.value as any)}
+                        className="border rounded px-2 py-1 h-9"
+                      >
+                        <option value="all">{language === 'ar' ? 'الكل' : 'All'}</option>
+                        <option value="monthly">{language === 'ar' ? 'شهري' : 'Monthly'}</option>
+                        <option value="half">{language === 'ar' ? 'نصف سنوي' : 'Half-Year'}</option>
+                        <option value="year">{language === 'ar' ? 'سنوي' : 'Yearly'}</option>
+                        <option value="five">{language === 'ar' ? '5 دقائق' : '5 minutes'}</option>
+                      </select>
+                    </div>
+                    <div className="flex flex-col">
+                      <span className="text-sm text-muted-foreground">{language === 'ar' ? 'أيام التمديد' : 'Extension days'}</span>
+                      <Input type="number" min={1} value={bulkDays || ''} onChange={(e) => setBulkDays(Number(e.target.value))} className="w-28" />
+                    </div>
+                    <Button onClick={handleExtendAll} disabled={bulkLoading}>
+                      {bulkLoading ? (language === 'ar' ? 'جاري التمديد...' : 'Extending...') : (language === 'ar' ? 'تمديد للجميع' : 'Extend All')}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader>
                   <CardTitle>
                     {language === 'ar' ? `المدفوعات المقبولة (${approvedPayments.length})` : `Approved Payments (${approvedPayments.length})`}
                   </CardTitle>
@@ -731,6 +975,9 @@ const PaymentsPayouts: React.FC = () => {
                           <TableHead>{language === 'ar' ? 'التاريخ' : 'Date'}</TableHead>
                           <TableHead>{language === 'ar' ? 'الحالة' : 'Status'}</TableHead>
                           <TableHead>{language === 'ar' ? 'إيصال الدفع' : 'Payment Receipt'}</TableHead>
+                          <TableHead>{language === 'ar' ? 'حالة التمديد' : 'Extension Status'}</TableHead>
+                          <TableHead>{language === 'ar' ? 'تمديد الاشتراك (أيام)' : 'Extend Subscription (days)'}</TableHead>
+                          <TableHead>{language === 'ar' ? 'إلغاء الاشتراك' : 'Cancel Subscription'}</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -786,6 +1033,235 @@ const PaymentsPayouts: React.FC = () => {
                               ) : (
                                 <span className="text-muted-foreground">-</span>
                               )}
+                            </TableCell>
+                            <TableCell>
+                              {((payment.extendedByDays || 0) > 0) ? (
+                                <div className="text-sm">
+                                  <Badge variant="outline" className="mr-2">{language === 'ar' ? 'ممدد' : 'Extended'}</Badge>
+                                  {(payment.extendedByDays || 0)} {language === 'ar' ? 'يوم' : 'day(s)'}
+                                </div>
+                              ) : (
+                                <div className="text-sm">
+                                  <Badge variant="outline" className="mr-2">{language === 'ar' ? 'غير ممدد' : 'Not extended'}</Badge>
+                                  0
+                                </div>
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex items-center gap-2">
+                                <Input
+                                  type="number"
+                                  min={1}
+                                  value={extensionDays[payment.teacher.id] || ''}
+                                  onChange={(e) => setExtensionDays(prev => ({ ...prev, [payment.teacher.id]: Number(e.target.value) }))}
+                                  placeholder={language === 'ar' ? 'أيام' : 'Days'}
+                                  className="w-24"
+                                />
+                                <Button
+                                  size="sm"
+                                  onClick={() => handleExtendExpiry(payment.teacher.id)}
+                                  disabled={!!extLoadingByTeacher[payment.teacher.id]}
+                                >
+                                  {extLoadingByTeacher[payment.teacher.id]
+                                    ? (language === 'ar' ? 'جاري التمديد...' : 'Extending...')
+                                    : (language === 'ar' ? 'تمديد' : 'Extend')}
+                                </Button>
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex items-center">
+                                <Button variant="destructive" size="sm" onClick={() => setCancelDialogOpenByTeacher(prev => ({ ...prev, [payment.teacher.id]: true }))}>
+                                  {language === 'ar' ? 'إلغاء' : 'Cancel'}
+                                </Button>
+                                <Dialog open={!!cancelDialogOpenByTeacher[payment.teacher.id]} onOpenChange={(v) => setCancelDialogOpenByTeacher(prev => ({ ...prev, [payment.teacher.id]: v }))}>
+                                  <DialogContent className="max-w-md">
+                                    <DialogHeader>
+                                      <DialogTitle>{language === 'ar' ? 'تأكيد إلغاء الاشتراك' : 'Confirm Cancellation'}</DialogTitle>
+                                    </DialogHeader>
+                                    <p className="text-sm text-muted-foreground">
+                                      {language === 'ar'
+                                        ? 'سيتم تحويل هذا الحساب إلى حالة غير مشترك وسيعتبر الاشتراك منتهيًا. هل أنت متأكد؟'
+                                        : 'This account will be set to non-subscribed and considered expired. Are you sure?'}
+                                    </p>
+                                    <div className="flex justify-end gap-2 mt-4">
+                                      <Button variant="outline" size="sm" onClick={() => setCancelDialogOpenByTeacher(prev => ({ ...prev, [payment.teacher.id]: false }))}>
+                                        {language === 'ar' ? 'إغلاق' : 'Close'}
+                                      </Button>
+                                      <Button
+                                        variant="destructive"
+                                        size="sm"
+                                        onClick={() => handleCancelSubscription(payment.teacher.id)}
+                                        disabled={!!cancelLoadingByTeacher[payment.teacher.id]}
+                                      >
+                                        {cancelLoadingByTeacher[payment.teacher.id]
+                                          ? (language === 'ar' ? 'جاري الإلغاء...' : 'Cancelling...')
+                                          : (language === 'ar' ? 'تأكيد الإلغاء' : 'Confirm Cancel')}
+                                      </Button>
+                                    </div>
+                                  </DialogContent>
+                                </Dialog>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            {/* Rejected Tab */}
+            <TabsContent value="rejected" className="space-y-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle>
+                    {language === 'ar' ? `الاشتراكات المرفوضة (${rejectedPayments.length})` : `Rejected Subscriptions (${rejectedPayments.length})`}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>{language === 'ar' ? 'المدرس' : 'Teacher'}</TableHead>
+                          <TableHead>{language === 'ar' ? 'المبلغ' : 'Amount'}</TableHead>
+                          <TableHead>{language === 'ar' ? 'العملة' : 'Currency'}</TableHead>
+                          <TableHead>{language === 'ar' ? 'التاريخ' : 'Date'}</TableHead>
+                          <TableHead>{language === 'ar' ? 'الحالة' : 'Status'}</TableHead>
+                          <TableHead>{language === 'ar' ? 'إيصال الدفع' : 'Payment Receipt'}</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {rejectedPayments.map((payment) => (
+                          <TableRow key={payment.id}>
+                            <TableCell>
+                              <div className="flex items-center gap-3">
+                                <Avatar className="h-8 w-8">
+                                  <AvatarImage src={payment.teacher.avatar} alt={payment.teacher.name} />
+                                  <AvatarFallback className="bg-primary/10 text-primary text-sm">
+                                    {payment.teacher.name.split(' ').map(n => n[0]).join('')}
+                                  </AvatarFallback>
+                                </Avatar>
+                                <div>
+                                  <div className="font-medium">{payment.teacher.name}</div>
+                                  <div className="text-sm text-muted-foreground">{teacherPhones[payment.teacher.id] || '—'}</div>
+                                  <div className="text-sm text-muted-foreground">{payment.teacher.email}</div>
+                                </div>
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <span className="font-medium">{payment.amount}</span>
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant="outline">{payment.currency || 'USD'}</Badge>
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex items-center gap-1">
+                                <Calendar className="h-4 w-4 text-muted-foreground" />
+                                <span className="text-sm">{payment.createdAt}</span>
+                              </div>
+                            </TableCell>
+                            <TableCell>{getPaymentStatusBadge(payment.status)}</TableCell>
+                            <TableCell>
+                              {payment.receiptBase64 ? (
+                                <Dialog>
+                                  <DialogTrigger asChild>
+                                    <Button variant="ghost" size="sm">
+                                      {language === 'ar' ? 'عرض الإيصال' : 'View Receipt'}
+                                    </Button>
+                                  </DialogTrigger>
+                                  <DialogContent className="max-w-3xl">
+                                    <DialogHeader>
+                                      <DialogTitle>
+                                        {language === 'ar' ? 'إيصال الدفع' : 'Payment Receipt'}
+                                      </DialogTitle>
+                                    </DialogHeader>
+                                    <div className="relative">
+                                      <img src={payment.receiptBase64} alt="Payment receipt" className="max-h-[24rem] w-auto" />
+                                    </div>
+                                  </DialogContent>
+                                </Dialog>
+                              ) : (
+                                <span className="text-muted-foreground">-</span>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            {/* Storage Add-ons Tab */}
+            <TabsContent value="storage_addons" className="space-y-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle>{language === 'ar' ? `طلبات زيادة المساحة (${storageAddonRequests.length})` : `Storage Add-on Requests (${storageAddonRequests.length})`}</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>{language === 'ar' ? 'المدرس' : 'Teacher'}</TableHead>
+                          <TableHead>{language === 'ar' ? 'المساحة المطلوبة (GB)' : 'Requested GB'}</TableHead>
+                          <TableHead>{language === 'ar' ? 'المبلغ' : 'Amount'}</TableHead>
+                          <TableHead>{language === 'ar' ? 'إيصال الدفع' : 'Receipt'}</TableHead>
+                          <TableHead>{language === 'ar' ? 'الإجراء' : 'Action'}</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {storageAddonRequests.map((p) => (
+                          <TableRow key={p.id}>
+                            <TableCell>
+                              <div className="flex items-center gap-3">
+                                <Avatar className="h-8 w-8">
+                                  <AvatarImage src={p.teacher.avatar} alt={p.teacher.name} />
+                                  <AvatarFallback className="bg-primary/10 text-primary text-sm">
+                                    {p.teacher.name.split(' ').map(n => n[0]).join('')}
+                                  </AvatarFallback>
+                                </Avatar>
+                                <div>
+                                  <div className="font-medium">{p.teacher.name}</div>
+                                  <div className="text-sm text-muted-foreground">{p.teacher.email}</div>
+                                </div>
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant="outline">{p.addonGB || 0} GB</Badge>
+                            </TableCell>
+                            <TableCell>
+                              <span className="font-medium">{p.amount}</span>
+                            </TableCell>
+                            <TableCell>
+                              {p.receiptBase64 ? (
+                                <Dialog>
+                                  <DialogTrigger asChild>
+                                    <Button variant="ghost" size="sm">{language === 'ar' ? 'عرض' : 'View'}</Button>
+                                  </DialogTrigger>
+                                  <DialogContent className="max-w-3xl">
+                                    <DialogHeader>
+                                      <DialogTitle>{language === 'ar' ? 'إيصال الدفع' : 'Payment Receipt'}</DialogTitle>
+                                    </DialogHeader>
+                                    <img src={p.receiptBase64} alt="Receipt" className="max-h-[24rem] w-auto" />
+                                  </DialogContent>
+                                </Dialog>
+                              ) : (
+                                <span className="text-sm text-muted-foreground">—</span>
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex items-center gap-2">
+                                <Button size="sm" variant="outline" onClick={() => handleApproveStorageAddon(p.id)} disabled={p.status !== 'pending'}>
+                                  {language === 'ar' ? 'موافقة' : 'Approve'}
+                                </Button>
+                                <Button size="sm" variant="destructive" onClick={() => handleRejectStorageAddon(p.id)} disabled={p.status !== 'pending'}>
+                                  {language === 'ar' ? 'رفض' : 'Reject'}
+                                </Button>
+                              </div>
                             </TableCell>
                           </TableRow>
                         ))}

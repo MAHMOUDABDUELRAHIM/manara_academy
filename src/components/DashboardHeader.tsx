@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { db } from '@/firebase/config';
-import { doc, getDoc, collection, onSnapshot, query, where } from 'firebase/firestore';
+import { doc, getDoc, getDocs, collection, onSnapshot, query, where } from 'firebase/firestore';
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { 
@@ -45,12 +45,39 @@ export const DashboardHeader = ({
   }, []);
   // Subscription approval + storage usage state (teacher)
   const [approvedPlanName, setApprovedPlanName] = useState<string | null>(null);
-  const [approvedStorageGB, setApprovedStorageGB] = useState<number | null>(null);
-  const [storageUsedBytes, setStorageUsedBytes] = useState<number>(0);
+  const [approvedStorageGB, setApprovedStorageGB] = useState<number | null>(() => {
+    try {
+      const raw = localStorage.getItem('approvedStorageGB');
+      const val = raw ? Number(raw) : null;
+      return typeof val === 'number' && !isNaN(val) ? val : null;
+    } catch {
+      return null;
+    }
+  });
+  const [extraStorageGB, setExtraStorageGB] = useState<number>(() => {
+    try {
+      const raw = localStorage.getItem('extraStorageGB');
+      const val = raw ? Number(raw) : 0;
+      return isNaN(val) ? 0 : val;
+    } catch {
+      return 0;
+    }
+  });
+  const [storageUsedBytes, setStorageUsedBytes] = useState<number>(() => {
+    try {
+      const raw = localStorage.getItem('lastStorageUsedBytes');
+      return raw ? Number(raw) : 0;
+    } catch {
+      return 0;
+    }
+  });
   const [hasActiveSubscription, setHasActiveSubscription] = useState<boolean>(() => {
     try { return localStorage.getItem('hasActiveSubscription') === 'true'; } catch { return false; }
   });
   const [hadApprovedSubscription, setHadApprovedSubscription] = useState<boolean>(false);
+  const [hasApprovedActiveSubscription, setHasApprovedActiveSubscription] = useState<boolean>(() => {
+    try { return localStorage.getItem('hasApprovedActiveSubscription') === 'true'; } catch { return false; }
+  });
 
   // Trial period logic for teachers: 24h countdown based on account creation
   const createdRaw: any = user?.profile?.createdAt as any;
@@ -103,17 +130,21 @@ export const DashboardHeader = ({
         const q = query(collection(db, 'payments'), where('teacherId', '==', teacherId));
         unsub = onSnapshot(q, async (snap) => {
           const payments = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
-          // Latest approved (unexpired)
-          const approvedList = payments
+          const basePayments = payments.filter(p => p?.type !== 'storage_addon');
+          const approvedList = basePayments
             .filter(p => p?.status === 'approved')
             .sort((a, b) => ((b?.createdAt?.seconds || 0) - (a?.createdAt?.seconds || 0)));
           const approvedP = approvedList[0];
-          try { setHadApprovedSubscription(approvedList.length > 0); } catch {}
+          try {
+            const had = approvedList.length > 0;
+            setHadApprovedSubscription(had);
+            try { localStorage.setItem('hadApprovedSubscription', had ? 'true' : 'false'); } catch {}
+          } catch {}
           const expApproved = approvedP?.expiresAt?.toDate?.() || approvedP?.expiresAt || null;
           const validApproved = expApproved instanceof Date ? (Date.now() < expApproved.getTime()) : !!approvedP;
 
           // Latest pending considered active within its period
-          const pendingList = payments
+          const pendingList = basePayments
             .filter(p => p?.status === 'pending')
             .sort((a, b) => ((b?.createdAt?.seconds || 0) - (a?.createdAt?.seconds || 0)));
           const pendingP = pendingList[0];
@@ -156,6 +187,25 @@ export const DashboardHeader = ({
           const hasActive = !!validApproved || !!validPending;
           setHasActiveSubscription(hasActive);
           try { localStorage.setItem('hasActiveSubscription', hasActive ? 'true' : 'false'); } catch {}
+          setHasApprovedActiveSubscription(!!validApproved);
+          try { localStorage.setItem('hasApprovedActiveSubscription', validApproved ? 'true' : 'false'); } catch {}
+
+          // If subscription expired naturally (no pending and not valid approved), reset add-on storage once
+          try {
+            const expiredNaturally = !validApproved && !validPending && (expApproved instanceof Date) && (Date.now() >= expApproved.getTime());
+            if (expiredNaturally) {
+              const markerKey = `extraResetOnExpiry:${teacherId}:${expApproved.getTime()}`;
+              const already = localStorage.getItem(markerKey) === 'done';
+              if (!already) {
+                await updateDoc(doc(db, 'teachers', teacherId), {
+                  extraStorageGB: 0,
+                  updatedAt: new Date().toISOString(),
+                });
+                try { localStorage.setItem(markerKey, 'done'); } catch {}
+                try { localStorage.setItem('extraStorageGB', '0'); } catch {}
+              }
+            }
+          } catch {}
 
           // Resolve plan name and expiry for countdown
           const activePayment = validApproved ? approvedP : (validPending ? pendingP : null);
@@ -172,11 +222,13 @@ export const DashboardHeader = ({
                 planDocData = psnap.exists() ? psnap.data() : null;
               }
               if (!planDocData && planName) {
-                // Try lookup by name if id missing
-                // Note: we don't have query imported here, but above we already have in scope. Reuse if necessary.
+                const qByName = query(collection(db, 'pricingPlans'), where('name', '==', planName));
+                const snaps = await getDocs(qByName);
+                if (!snaps.empty) {
+                  planDocData = snaps.docs[0].data();
+                }
               }
               const periodStr = (planDocData?.period || '').toString().toLowerCase();
-              // Map to ms: month=30d, half-year=180d, year=365d, 5 minutes for testing
               const isYear = periodStr.includes('year') || periodStr.includes('annual') || periodStr.includes('سنوي') || periodStr.includes('سنة') || periodStr.includes('سنوية') || periodStr.includes('ثانوية');
               const isHalfYear = periodStr.includes('half') || periodStr.includes('semi') || periodStr.includes('semiannual') || periodStr.includes('semi-annual') || periodStr.includes('نصف') || periodStr.includes('نصف سنوي') || periodStr.includes('نصف سنوية') || periodStr.includes('نصف ثانوية');
               const isMonth = periodStr.includes('month') || periodStr.includes('monthly') || periodStr.includes('شهري') || periodStr.includes('شهر');
@@ -189,6 +241,11 @@ export const DashboardHeader = ({
                 planPeriodMs = 180 * 24 * 60 * 60 * 1000;
               } else if (isMonth) {
                 planPeriodMs = 30 * 24 * 60 * 60 * 1000;
+              }
+              const sgb = typeof planDocData?.storageGB === 'number' ? planDocData.storageGB : undefined;
+              if (typeof sgb === 'number') {
+                setApprovedStorageGB(sgb);
+                try { localStorage.setItem('approvedStorageGB', String(sgb)); } catch {}
               }
             } catch {
               planPeriodMs = null;
@@ -213,25 +270,37 @@ export const DashboardHeader = ({
             } else {
               try { localStorage.removeItem('subscriptionExpiresAt'); } catch {}
             }
-            // Fetch storageGB only when planId present; else keep null
-            if (planId) {
-              try {
-                const psnap = await getDoc(doc(db, 'pricingPlans', planId));
-                const pdata: any = psnap.exists() ? psnap.data() : null;
-                const sgb = typeof pdata?.storageGB === 'number' ? pdata.storageGB : undefined;
-                setApprovedStorageGB(typeof sgb === 'number' ? sgb : null);
-              } catch {
-                setApprovedStorageGB(null);
-              }
-            } else {
-              setApprovedStorageGB(null);
-            }
-            // Compute usage
+            // storageGB is already set above based on planDocData or cleared if not available
             try {
               const used = await StorageService.getTeacherStorageUsageBytes(teacherId);
-              if (!cancelled) setStorageUsedBytes(used);
+              let offset = 0;
+              let s3Local = 0;
+              try {
+                const raw = localStorage.getItem('teacherUploadOffsetBytes');
+                offset = raw ? Number(raw) : 0;
+              } catch {}
+              try {
+                const rawS3 = localStorage.getItem('teacherS3UsageBytes');
+                s3Local = rawS3 ? Number(rawS3) : 0;
+              } catch {}
+              const s3PersistRaw = (teacher as any)?.s3UsageBytes;
+              const s3Persist = typeof s3PersistRaw === 'number' ? s3PersistRaw : 0;
+              const s3Add = s3Persist > 0 ? s3Persist : (isNaN(s3Local) ? 0 : s3Local);
+              const extra = (isNaN(offset) ? 0 : offset) + s3Add;
+              const baseRaw = localStorage.getItem('usageBaselineBytes');
+              const base = baseRaw ? Number(baseRaw) : 0;
+              const total = used + extra;
+              const sinceReset = Math.max(0, total - (isNaN(base) ? 0 : base));
+              if (!cancelled) {
+                setStorageUsedBytes(sinceReset);
+                try { localStorage.setItem('lastStorageUsedBytes', String(sinceReset)); } catch {}
+              }
             } catch {
-              if (!cancelled) setStorageUsedBytes(0);
+              if (!cancelled) {
+                let last = 0;
+                try { const raw = localStorage.getItem('lastStorageUsedBytes'); last = raw ? Number(raw) : 0; } catch {}
+                setStorageUsedBytes(last);
+              }
             }
           } else {
             setApprovedPlanName(null);
@@ -247,6 +316,103 @@ export const DashboardHeader = ({
       if (unsub) unsub();
     };
   }, [user?.role, user?.uid]);
+
+  // Observe teacher document to get extraStorageGB
+  useEffect(() => {
+    let unsub: (() => void) | null = null;
+    let cancelled = false;
+    const run = async () => {
+      try {
+        if (user?.role !== 'teacher' || !user?.uid) return;
+        const teacher = await TeacherService.getTeacherByUid(user.uid).catch(() => null);
+        const teacherId = (teacher as any)?.id || user.uid;
+        unsub = onSnapshot(doc(db, 'teachers', teacherId), (snap) => {
+          const data = snap.data() as any;
+          const extra = typeof data?.extraStorageGB === 'number' ? data.extraStorageGB : 0;
+          const baseline = typeof data?.usageBaselineBytes === 'number' ? data.usageBaselineBytes : 0;
+          const resetAt = (data?.usageResetAt || '') as string;
+          if (!cancelled) {
+            setExtraStorageGB(extra);
+            try { localStorage.setItem('extraStorageGB', String(extra)); } catch {}
+            try { localStorage.setItem('usageBaselineBytes', String(baseline)); } catch {}
+            try {
+              const prevReset = localStorage.getItem('usageResetAt') || '';
+              if (resetAt && resetAt !== prevReset) {
+                localStorage.setItem('usageResetAt', resetAt);
+                localStorage.setItem('teacherUploadOffsetBytes', '0');
+                localStorage.setItem('teacherS3UsageBytes', '0');
+                localStorage.setItem('lastStorageUsedBytes', '0');
+              }
+            } catch {}
+          }
+        });
+      } catch {}
+    };
+    run();
+    return () => { cancelled = true; if (unsub) unsub(); };
+  }, [user?.role, user?.uid]);
+
+  useEffect(() => {
+    const onUpdate = (e: any) => {
+      const delta = e?.detail?.addedBytes;
+      const add = typeof delta === 'number' ? delta : 0;
+      if (add > 0) {
+        setStorageUsedBytes((prev) => {
+          const next = prev + add;
+          try { localStorage.setItem('lastStorageUsedBytes', String(next)); } catch {}
+          return next;
+        });
+      }
+      const run = async () => {
+        try {
+          if (!user?.uid) return;
+          const teacher = await TeacherService.getTeacherByUid(user.uid).catch(() => null);
+          const teacherId = (teacher as any)?.id || user.uid;
+          const used = await StorageService.getTeacherStorageUsageBytes(teacherId);
+          let offset = 0;
+          let s3Local = 0;
+          try {
+            const raw = localStorage.getItem('teacherUploadOffsetBytes');
+            offset = raw ? Number(raw) : 0;
+          } catch {}
+          try {
+            const rawS3 = localStorage.getItem('teacherS3UsageBytes');
+            s3Local = rawS3 ? Number(rawS3) : 0;
+          } catch {}
+          const s3PersistRaw = (teacher as any)?.s3UsageBytes;
+          const s3Persist = typeof s3PersistRaw === 'number' ? s3PersistRaw : 0;
+          const s3Add = s3Persist > 0 ? s3Persist : (isNaN(s3Local) ? 0 : s3Local);
+          const extra = (isNaN(offset) ? 0 : offset) + s3Add;
+          const baseRaw = localStorage.getItem('usageBaselineBytes');
+          const base = baseRaw ? Number(baseRaw) : 0;
+          const total = used + extra;
+          const sinceReset = Math.max(0, total - (isNaN(base) ? 0 : base));
+          setStorageUsedBytes(sinceReset);
+          try { localStorage.setItem('lastStorageUsedBytes', String(sinceReset)); } catch {}
+        } catch {}
+      };
+      setTimeout(run, 0);
+    };
+    window.addEventListener('teacher-storage-updated', onUpdate);
+    return () => {
+      window.removeEventListener('teacher-storage-updated', onUpdate);
+    };
+  }, [user?.uid]);
+
+  // Persist a flag when storage usage warning (80%+) is shown, for routing guard to avoid page lock due to storage only
+  useEffect(() => {
+    try {
+      const capFromLocal = (() => { try { const raw = localStorage.getItem('approvedStorageGB'); return raw ? Number(raw) : null; } catch { return null; } })();
+      const baseGB = (typeof approvedStorageGB === 'number' && approvedStorageGB > 0)
+        ? approvedStorageGB
+        : (typeof capFromLocal === 'number' && capFromLocal > 0 ? capFromLocal : 0);
+      const capGB = baseGB + (extraStorageGB > 0 ? extraStorageGB : 0);
+      const usedGB = storageUsedBytes / (1024 * 1024 * 1024);
+      const pct = capGB > 0 ? Math.min(100, Math.max(0, (usedGB / capGB) * 100)) : 0;
+      const warnOnly = pct >= 80 && pct < 100;
+      localStorage.setItem('storageWarningOnly', warnOnly ? 'true' : 'false');
+    } catch {}
+  }, [storageUsedBytes, approvedStorageGB, extraStorageGB]);
 
   const configuredMs = trialCfg?.ms ?? (24 * 60 * 60 * 1000);
   const trialEndsMs = createdMs ? (createdMs + configuredMs) : 0;
@@ -405,7 +571,7 @@ export const DashboardHeader = ({
           </div>
 
           {/* Teacher active subscription: show plan and optional storage usage */}
-          {user?.role === 'teacher' && hasActiveSubscription ? (
+          {user?.role === 'teacher' && hasApprovedActiveSubscription ? (
             <div className="order-3 hidden md:flex relative items-center gap-3 premium-gradient-frame rounded-full px-4 py-2 text-base whitespace-nowrap bg-transparent dir-rtl">
               <div className="relative z-10 flex items-center gap-2">
                 <span className="text-sm font-semibold">
@@ -436,16 +602,33 @@ export const DashboardHeader = ({
                       return null;
                     }
                   })()}
-                  {approvedStorageGB && approvedStorageGB > 0 && (() => {
+                  {(() => {
+                    const baseGB = (typeof approvedStorageGB === 'number' && approvedStorageGB > 0) ? approvedStorageGB : 0;
+                    if (baseGB <= 0) return null;
+                    const capGB = baseGB + (extraStorageGB > 0 ? extraStorageGB : 0);
                     const usedGB = storageUsedBytes / (1024 * 1024 * 1024);
-                    const pct = Math.min(100, Math.max(0, (usedGB / approvedStorageGB) * 100));
-                    const label = `${usedGB.toFixed(2)} / ${approvedStorageGB} GB`;
+                    const usedMB = storageUsedBytes / (1024 * 1024);
+                    const pct = capGB > 0 ? Math.min(100, Math.max(0, (usedGB / capGB) * 100)) : 0;
+                    const capText = (capGB % 1 === 0) ? `${capGB.toFixed(0)} GB` : `${capGB.toFixed(2)} GB`;
+                    const usedText = usedGB < 1 ? `${usedMB.toFixed(0)} MB` : `${usedGB.toFixed(2)} GB`;
+                    const label = `${usedText} / ${capText}`;
+                    const suffix = language === 'ar' ? 'المساحة التخزينية للباقة' : 'Plan storage capacity';
+                    const barColor = pct >= 80 ? 'bg-red-500' : (pct >= 50 ? 'bg-orange-500' : 'bg-green-500');
                     return (
                       <div className="mt-2">
-                        <div className="text-[10px] text-muted-foreground mb-1 text-right">{label}</div>
+                        <div className="text-[10px] text-muted-foreground mb-1 text-right">{label} • {suffix}</div>
                         <div className="min-w-[140px] w-[220px]">
-                          <Progress value={pct} className="rounded-none h-2" />
+                          <div className="w-full h-2 bg-muted rounded-none">
+                            <div className={`h-2 ${barColor}`} style={{ width: `${pct}%` }} />
+                          </div>
                         </div>
+                        {pct >= 80 && (
+                          <div className="mt-2 text-[11px] text-red-600 text-right">
+                            {language === 'ar'
+                              ? <>لقد اقتربت من الحد المسموح به للمساحة التخزينية (80%). <Link to="/teacher-dashboard/storage-addon" className="underline">شراء مساحة إضافية</Link></>
+                              : <>You are nearing the storage limit (80%). <Link to="/teacher-dashboard/storage-addon" className="underline">Buy additional storage</Link></>}
+                          </div>
+                        )}
                       </div>
                     );
                   })()}

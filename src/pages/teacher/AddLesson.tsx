@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, Link } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,10 +15,17 @@ import {
   ArrowLeft, 
   FileVideo,
   CheckCircle,
-  AlertCircle
+  AlertCircle,
+  HardDrive
 } from "lucide-react";
 import { toast } from "sonner";
 import { CourseService } from '@/services/courseService';
+import { StorageService } from '@/services/storageService';
+import { TeacherService } from '@/services/teacherService';
+import { doc, updateDoc, increment } from 'firebase/firestore';
+import { db } from '@/firebase/config';
+import { storage } from '@/firebase/config';
+import { ref as storageRef, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 
 interface LessonData {
   title: string;
@@ -50,7 +57,7 @@ export const AddLesson = () => {
     }));
   };
 
-  const handleVideoUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleVideoUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
       // التحقق من نوع الملف
@@ -66,6 +73,32 @@ export const AddLesson = () => {
         return;
       }
 
+      try {
+        let usedSinceReset = 0;
+        try {
+          const lastRaw = localStorage.getItem('lastStorageUsedBytes');
+          usedSinceReset = lastRaw ? Number(lastRaw) : 0;
+        } catch {}
+        let storageGb = 0;
+        try {
+          const rawGb = localStorage.getItem('approvedStorageGB');
+          const baseGb = rawGb ? Number(rawGb) : 0;
+          const extraRaw = localStorage.getItem('extraStorageGB');
+          const extraGb = extraRaw ? Number(extraRaw) : 0;
+          storageGb = (isNaN(baseGb) ? 0 : baseGb) + (isNaN(extraGb) ? 0 : extraGb);
+        } catch {}
+        if (storageGb > 0) {
+          const capBytes = storageGb * 1024 * 1024 * 1024;
+          const available = capBytes - usedSinceReset;
+          if (available < file.size) {
+            toast.error(language === 'ar' 
+              ? 'الفيديو يتجاوز المساحة التخزينية المتوفرة لديك. قم بترقية الباقة أو شراء مساحة إضافية.' 
+              : 'Video exceeds your available storage. Upgrade your plan or buy additional storage.');
+            return;
+          }
+        }
+      } catch {}
+
       setLessonData(prev => ({
         ...prev,
         videoFile: file
@@ -79,7 +112,10 @@ export const AddLesson = () => {
   const uploadVideoToS3 = async (file: File) => {
     setIsUploading(true);
     setUploadProgress(0);
-    const endpoint = `/api/upload-s3-video`;
+    const apiBase = (typeof window !== 'undefined'
+      ? (localStorage.getItem('apiBase') || 'http://127.0.0.1:8000')
+      : 'http://127.0.0.1:8000');
+    const endpoint = `${apiBase}/api/upload-s3-video`;
     const form = new FormData();
     form.append('video', file);
     if (lessonData.title) form.append('title', lessonData.title);
@@ -114,9 +150,7 @@ export const AddLesson = () => {
 
       xhr.onerror = () => {
         clearFallback();
-        setIsUploading(false);
-        setUploadedVideoUrl(null);
-        toast.error(language === 'ar' ? 'فشل الاتصال بالسيرفر أثناء الرفع.' : 'Failed to connect to server during upload.');
+        uploadToFirebase(file);
       };
       xhr.onabort = () => {
         clearFallback();
@@ -143,23 +177,97 @@ export const AddLesson = () => {
 
         if (status >= 200 && status < 300 && data?.success) {
           setUploadProgress(100);
+          setIsUploading(false);
           setUploadedVideoUrl(data.url);
           toast.success(language === 'ar' ? 'تم رفع الفيديو بنجاح!' : 'Video uploaded successfully!');
+          try {
+            const prevRaw = localStorage.getItem('teacherUploadOffsetBytes');
+            const prev = prevRaw ? Number(prevRaw) : 0;
+            localStorage.setItem('teacherUploadOffsetBytes', String(prev));
+          } catch {}
+          try {
+            const prevS3Raw = localStorage.getItem('teacherS3UsageBytes');
+            const prevS3 = prevS3Raw ? Number(prevS3Raw) : 0;
+            const nextS3 = prevS3 + file.size;
+            localStorage.setItem('teacherS3UsageBytes', String(nextS3));
+          } catch {}
+          try {
+            window.dispatchEvent(new CustomEvent('teacher-storage-updated', { detail: { addedBytes: file.size } }));
+          } catch {}
+          try {
+            const lastRaw = localStorage.getItem('lastStorageUsedBytes');
+            const last = lastRaw ? Number(lastRaw) : 0;
+            const nextLast = last + file.size;
+            localStorage.setItem('lastStorageUsedBytes', String(nextLast));
+          } catch {}
+          try {
+            (async () => {
+              const t = user?.uid ? await TeacherService.getTeacherByUid(user.uid).catch(() => null) : null;
+              const teacherId = (t as any)?.id || user?.uid || null;
+              if (teacherId) {
+                await updateDoc(doc(db, 'teachers', teacherId), {
+                  s3UsageBytes: increment(file.size),
+                  updatedAt: new Date().toISOString(),
+                });
+              }
+            })();
+          } catch {}
         } else {
-          const msg = (data?.message && data?.error) ? `${data.message}: ${data.error}`
-                    : (data?.message || `Upload failed with status ${status}`);
-          setUploadedVideoUrl(null);
-          toast.error(language === 'ar' ? `فشل الرفع: ${msg}` : `Upload failed: ${msg}`);
+          uploadToFirebase(file);
         }
-        setIsUploading(false);
       };
 
       xhr.send(form);
+      setUploadProgress((prev) => (prev < 1 ? 1 : prev));
+      if (fallbackTimer === null) {
+        fallbackTimer = window.setInterval(() => {
+          setUploadProgress(prev => (prev < 95 ? prev + 1 : prev));
+        }, 300);
+      }
     } catch (err) {
-      console.error(err);
+      uploadToFirebase(file);
+    }
+  };
+
+  const uploadToFirebase = (file: File) => {
+    try {
+      setIsUploading(true);
+      const path = `lesson-files/${courseId}/${Date.now()}_${file.name}`;
+      const ref = storageRef(storage, path);
+      const task = uploadBytesResumable(ref, file);
+      task.on('state_changed', (snapshot) => {
+        const percent = Math.min(100, Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100));
+        setUploadProgress((prev) => Math.max(prev, percent));
+      }, (error: any) => {
+        setIsUploading(false);
+        setUploadedVideoUrl(null);
+        toast.error(language === 'ar' ? 'فشل رفع الفيديو إلى التخزين.' : 'Failed to upload video to storage.');
+      }, async () => {
+        try {
+          const url = await getDownloadURL(task.snapshot.ref);
+          setUploadProgress(100);
+          setUploadedVideoUrl(url);
+          setIsUploading(false);
+          toast.success(language === 'ar' ? 'تم رفع الفيديو بنجاح!' : 'Video uploaded successfully!');
+          try {
+            const prevRaw = localStorage.getItem('teacherUploadOffsetBytes');
+            const prev = prevRaw ? Number(prevRaw) : 0;
+            const next = prev + file.size;
+            localStorage.setItem('teacherUploadOffsetBytes', String(next));
+          } catch {}
+          try {
+            window.dispatchEvent(new CustomEvent('teacher-storage-updated', { detail: { addedBytes: file.size } }));
+          } catch {}
+        } catch (e) {
+          setIsUploading(false);
+          setUploadedVideoUrl(null);
+          toast.error(language === 'ar' ? 'تعذر الحصول على رابط الفيديو بعد الرفع.' : 'Unable to get video URL after upload.');
+        }
+      });
+    } catch (e) {
       setIsUploading(false);
       setUploadedVideoUrl(null);
-      toast.error(language === 'ar' ? 'حدث خطأ غير متوقع أثناء الرفع.' : 'Unexpected error occurred during upload.');
+      toast.error(language === 'ar' ? 'حدث خطأ أثناء رفع الفيديو.' : 'An error occurred during video upload.');
     }
   };
 
@@ -295,7 +403,23 @@ export const AddLesson = () => {
                       />
                       <label
                         htmlFor="video-upload"
-                        className="cursor-pointer flex flex-col items-center gap-4"
+                        className={`flex flex-col items-center gap-4 ${(() => {
+                          try {
+                            const rawGb = localStorage.getItem('approvedStorageGB');
+                            const baseGb = rawGb ? Number(rawGb) : 0;
+                            const extraRaw = localStorage.getItem('extraStorageGB');
+                            const extraGb = extraRaw ? Number(extraRaw) : 0;
+                            const capGb = (isNaN(baseGb) ? 0 : baseGb) + (isNaN(extraGb) ? 0 : extraGb);
+                            const lastRaw = localStorage.getItem('lastStorageUsedBytes');
+                            const lastUsed = lastRaw ? Number(lastRaw) : 0;
+                            const baselineRaw = localStorage.getItem('usageBaselineBytes');
+                            const baseline = baselineRaw ? Number(baselineRaw) : 0;
+                            const usedSinceReset = Math.max(0, lastUsed - (isNaN(baseline) ? 0 : baseline));
+                            const capBytes = capGb * 1024 * 1024 * 1024;
+                            const blocked = capGb > 0 && usedSinceReset >= capBytes;
+                            return blocked ? 'pointer-events-none opacity-50 cursor-not-allowed' : 'cursor-pointer';
+                          } catch { return 'cursor-pointer'; }
+                        })()}`}
                       >
                         <div className="w-16 h-16 bg-[#2c4656]/10 rounded-full flex items-center justify-center">
                           <Upload className="h-8 w-8 text-[#2c4656]" />
@@ -309,6 +433,41 @@ export const AddLesson = () => {
                           </p>
                         </div>
                       </label>
+                      {(() => {
+                          try {
+                          const rawGb = localStorage.getItem('approvedStorageGB');
+                          const baseGb = rawGb ? Number(rawGb) : 0;
+                          const extraRaw = localStorage.getItem('extraStorageGB');
+                          const extraGb = extraRaw ? Number(extraRaw) : 0;
+                          const capGb = (isNaN(baseGb) ? 0 : baseGb) + (isNaN(extraGb) ? 0 : extraGb);
+                          const lastRaw = localStorage.getItem('lastStorageUsedBytes');
+                          const lastUsed = lastRaw ? Number(lastRaw) : 0;
+                          const capBytes = capGb * 1024 * 1024 * 1024;
+                          const blocked = capGb > 0 && lastUsed >= capBytes;
+                          if (blocked) {
+                            return (
+                              <div className="mt-3 text-sm text-red-600">
+                                {language === 'ar' 
+                                  ? <>
+                                      لقد وصلت إلى الحد المسموح به من المساحة.
+                                      <Link to="/teacher-dashboard/storage-addon" className="inline-flex items-center gap-1 px-2 py-1 ml-2 rounded-md border border-red-200 bg-red-50 text-red-600">
+                                        <HardDrive className="h-4 w-4" />
+                                        <span>شراء مساحة إضافية</span>
+                                      </Link>
+                                    </>
+                                  : <>
+                                      You reached your storage limit.
+                                      <Link to="/teacher-dashboard/storage-addon" className="inline-flex items-center gap-1 px-2 py-1 ml-2 rounded-md border border-red-200 bg-red-50 text-red-600">
+                                        <HardDrive className="h-4 w-4" />
+                                        <span>Buy additional storage</span>
+                                      </Link>
+                                    </>}
+                              </div>
+                            );
+                          }
+                        } catch {}
+                        return null;
+                      })()}
                     </div>
                   ) : (
                     <div className="space-y-4">

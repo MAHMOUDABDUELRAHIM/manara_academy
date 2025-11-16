@@ -79,6 +79,7 @@ const Settings: React.FC = () => {
   const [activeTab, setActiveTab] = useState('general');
   const [isEditingPlan, setIsEditingPlan] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<Plan | null>(null);
+  const [storageUnit, setStorageUnit] = useState<'GB' | 'MB'>('GB');
 
   // General Settings State
   const [generalSettings, setGeneralSettings] = useState({
@@ -889,20 +890,32 @@ const Settings: React.FC = () => {
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="planStorageGB">{language === 'ar' ? 'المساحة المتاحة (جيجا)' : 'Available Storage (GB)'}</Label>
-                    <Input
-                      id="planStorageGB"
-                      type="number"
-                      min={0}
-                      value={selectedPlan.storageGB ?? 0}
-                      onChange={(e) => {
-                        const val = parseFloat(e.target.value);
-                        setSelectedPlan({
-                          ...selectedPlan,
-                          storageGB: Number.isFinite(val) ? val : 0,
-                        });
-                      }}
-                    />
+                    <Label htmlFor="planStorageGB">{language === 'ar' ? 'المساحة المتاحة' : 'Available Storage'}</Label>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        id="planStorageGB"
+                        type="number"
+                        min={0}
+                        value={storageUnit === 'GB' ? (selectedPlan.storageGB ?? 0) : ((selectedPlan.storageGB ?? 0) * 1024)}
+                        onChange={(e) => {
+                          const val = parseFloat(e.target.value);
+                          const gbVal = storageUnit === 'GB' ? val : (val / 1024);
+                          setSelectedPlan({
+                            ...selectedPlan,
+                            storageGB: Number.isFinite(gbVal) ? gbVal : 0,
+                          });
+                        }}
+                      />
+                      <Select value={storageUnit} onValueChange={(v) => setStorageUnit((v as 'GB' | 'MB') || 'GB')}>
+                        <SelectTrigger className="w-24">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="GB">GB</SelectItem>
+                          <SelectItem value="MB">MB</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
 
                   {/* Allowed sections inside each page for this plan */}

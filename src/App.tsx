@@ -27,6 +27,7 @@ import Payouts from "./pages/teacher/Payouts";
 import { AddLesson } from "./pages/teacher/AddLesson";
 import TeacherAssessments from "./pages/teacher/Assessments";
 import TeacherSettings from "./pages/teacher/Settings";
+import StorageAddon from "./pages/teacher/StorageAddon";
 
 import ManageUsers from "./pages/admin/ManageUsers";
 import ManageCourses from "./pages/admin/ManageCourses";
@@ -134,6 +135,11 @@ import ErrorBoundary from "@/components/ErrorBoundary";
               <Route path="/teacher-dashboard/settings" element={
                 <ProtectedRoute requiredRole="teacher">
                   <TeacherSettings />
+                </ProtectedRoute>
+              } />
+              <Route path="/teacher-dashboard/storage-addon" element={
+                <ProtectedRoute requiredRole="teacher">
+                  <StorageAddon />
                 </ProtectedRoute>
               } />
 

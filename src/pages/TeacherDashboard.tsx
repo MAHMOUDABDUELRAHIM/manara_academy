@@ -638,8 +638,9 @@ export const TeacherDashboard = () => {
         let hasApproved = false;
         let hasValidApproved = false;
         let pendingForPlan: string | null = null;
-        let hasRejected = false;
-        let rejectedForPlan: string | null = null;
+        let latestApprovedAtMs: number | undefined;
+        let latestPendingCreatedMs: number | undefined;
+        const rejectedDocs: { planId?: string; cancelledAtMs?: number; createdAtMs?: number }[] = [];
         snapshot.forEach((docSnap) => {
           const d = docSnap.data() as any;
           const st = d?.status;
@@ -651,11 +652,26 @@ export const TeacherDashboard = () => {
                 hasValidApproved = true;
               }
             }
-          }
-          else if (st === 'pending') pendingForPlan = typeof d?.planId === 'string' ? d.planId : pendingForPlan;
-          else if (st === 'rejected') {
-            hasRejected = true;
-            rejectedForPlan = typeof d?.planId === 'string' ? d.planId : rejectedForPlan;
+            const apprTs = d?.approvedAt?.toDate?.() || d?.approvedAt || d?.createdAt?.toDate?.() || d?.createdAt || null;
+            const apprMs = apprTs instanceof Date ? apprTs.getTime() : undefined;
+            if (typeof apprMs === 'number') {
+              if (latestApprovedAtMs == null || apprMs > latestApprovedAtMs) latestApprovedAtMs = apprMs;
+            }
+          } else if (st === 'pending') {
+            pendingForPlan = typeof d?.planId === 'string' ? d.planId : pendingForPlan;
+            const pendTs = d?.createdAt?.toDate?.() || d?.createdAt || null;
+            const pendMs = pendTs instanceof Date ? pendTs.getTime() : undefined;
+            if (typeof pendMs === 'number') {
+              if (latestPendingCreatedMs == null || pendMs > latestPendingCreatedMs) latestPendingCreatedMs = pendMs;
+            }
+          } else if (st === 'rejected') {
+            const cancelledTs = d?.cancelledAt?.toDate?.() || d?.cancelledAt || null;
+            const createdTs = d?.createdAt?.toDate?.() || d?.createdAt || null;
+            rejectedDocs.push({
+              planId: typeof d?.planId === 'string' ? d.planId : undefined,
+              cancelledAtMs: cancelledTs instanceof Date ? cancelledTs.getTime() : undefined,
+              createdAtMs: createdTs instanceof Date ? createdTs.getTime() : undefined,
+            });
           }
         });
 
@@ -675,19 +691,32 @@ export const TeacherDashboard = () => {
           setRejectedPlanId(null);
           setRejectionVisibleUntil(null);
           if (rejectionTimeoutRef.current) { try { clearTimeout(rejectionTimeoutRef.current); } catch {} rejectionTimeoutRef.current = null; }
-        } else if (hasRejected && rejectedForPlan) {
-          setIsSubscriptionApproved(false);
-          try { localStorage.setItem('isSubscriptionApproved', 'false'); } catch {}
-          setPendingPlanId(null); // enable buttons again
-          setRejectedPlanId(rejectedForPlan);
-          const expiresAt = Date.now() + 5 * 60 * 1000;
-          setRejectionVisibleUntil(expiresAt);
-          if (rejectionTimeoutRef.current) { try { clearTimeout(rejectionTimeoutRef.current); } catch {} }
-          rejectionTimeoutRef.current = window.setTimeout(() => {
-            setRejectedPlanId(null);
-            setRejectionVisibleUntil(null);
-            rejectionTimeoutRef.current = null;
-          }, 5 * 60 * 1000);
+        } else if (rejectedDocs.length > 0) {
+          const byCancel = rejectedDocs
+            .filter(r => typeof r.cancelledAtMs === 'number')
+            .sort((a, b) => ((b.cancelledAtMs || 0) - (a.cancelledAtMs || 0)));
+          const latest = byCancel[0];
+          const latestCancelMs = latest?.cancelledAtMs;
+          const isCancellationLatest = typeof latestCancelMs === 'number'
+            && (latestApprovedAtMs == null || latestCancelMs > latestApprovedAtMs)
+            && (latestPendingCreatedMs == null || latestCancelMs > latestPendingCreatedMs);
+          if (latest && latest.planId && isCancellationLatest) {
+            setIsSubscriptionApproved(false);
+            try { localStorage.setItem('isSubscriptionApproved', 'false'); } catch {}
+            setPendingPlanId(null);
+            setRejectedPlanId(latest.planId);
+            const expiresAt = Date.now() + 5 * 60 * 1000;
+            setRejectionVisibleUntil(expiresAt);
+            if (rejectionTimeoutRef.current) { try { clearTimeout(rejectionTimeoutRef.current); } catch {} }
+            rejectionTimeoutRef.current = window.setTimeout(() => {
+              setRejectedPlanId(null);
+              setRejectionVisibleUntil(null);
+              rejectionTimeoutRef.current = null;
+            }, 5 * 60 * 1000);
+          } else {
+            setIsSubscriptionApproved(false);
+            try { localStorage.setItem('isSubscriptionApproved', 'false'); } catch {}
+          }
         } else {
           // Preserve existing pending state to avoid race conditions right after upload
           // Do not force-clear pendingPlanId when no payment docs are observed yet

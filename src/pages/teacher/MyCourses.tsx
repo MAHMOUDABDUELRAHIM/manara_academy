@@ -43,6 +43,7 @@ import { VideoService } from "@/services/videoService";
 import { StudentService } from "@/services/studentService";
 import { TeacherService } from "@/services/teacherService";
 import { isSectionAllowed } from "@/utils/access";
+import { Calendar } from "@/components/ui/calendar";
 
 interface Course {
   id: string;
@@ -100,6 +101,10 @@ const teacherName = user?.displayName || (language === 'ar' ? 'مدرس جديد
   const [isDeletingLesson, setIsDeletingLesson] = useState(false);
   const [isDeletingCourse, setIsDeletingCourse] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  const [scheduleEditingIndex, setScheduleEditingIndex] = useState<number | null>(null);
+  const [scheduledHour, setScheduledHour] = useState<number>(12);
+  const [scheduledMinute, setScheduledMinute] = useState<number>(0);
+  const [scheduledPeriod, setScheduledPeriod] = useState<'am' | 'pm'>("am");
 
   // Ø¬Ù„Ø¨ Ø¯ÙˆØ±Ø§Øª Ø§Ù„Ù…Ø¯Ø±Ø³ (بالمعرف الفعّال)
   useEffect(() => {
@@ -265,7 +270,7 @@ const teacherName = user?.displayName || (language === 'ar' ? 'مدرس جديد
   };
 
   // ØªØ­Ø¯ÙŠØ« Ø­Ù‚ÙˆÙ„ Ø¯Ø±Ø³ Ù…Ø¹ÙŠÙ†
-  const updateLessonField = (index: number, key: 'title' | 'description', value: string) => {
+  const updateLessonField = (index: number, key: 'title' | 'description' | 'visibility' | 'publishAt', value: string) => {
     setEditingCourse((prev: any) => {
       const lessons = [...(prev?.lessons || [])];
       if (lessons[index]) {
@@ -777,29 +782,177 @@ const teacherName = user?.displayName || (language === 'ar' ? 'مدرس جديد
                                   </AlertDialogContent>
                                 </AlertDialog>
                               </div>
-                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <div>
-                                  <label className="block text-sm text-gray-600 mb-1">
-                                    {language === 'ar' ? 'عنوان الدرس' : 'Lesson Title'}
-                                  </label>
-                                  <Input
-                                    value={lesson.title || ''}
-                                    onChange={(e) => updateLessonField(index, 'title', e.target.value)}
-                                    className="border-gray-200"
-                                  />
-                                </div>
-                                <div>
-                                  <label className="block text-sm text-gray-600 mb-1">
-                                    {language === 'ar' ? 'وصف الدرس' : 'Lesson Description'}
-                                  </label>
-                                  <Input
-                                    value={lesson.description || ''}
-                                    onChange={(e) => updateLessonField(index, 'description', e.target.value)}
-                                    className="border-gray-200"
-                                  />
-                                </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              <div>
+                                <label className="block text-sm text-gray-600 mb-1">
+                                  {language === 'ar' ? 'عنوان الدرس' : 'Lesson Title'}
+                                </label>
+                                <Input
+                                  value={lesson.title || ''}
+                                  onChange={(e) => updateLessonField(index, 'title', e.target.value)}
+                                  className="border-gray-200"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-sm text-gray-600 mb-1">
+                                  {language === 'ar' ? 'وصف الدرس' : 'Lesson Description'}
+                                </label>
+                                <Input
+                                  value={lesson.description || ''}
+                                  onChange={(e) => updateLessonField(index, 'description', e.target.value)}
+                                  className="border-gray-200"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-sm text-gray-600 mb-1">
+                                  {language === 'ar' ? 'حالة العرض' : 'Visibility'}
+                                </label>
+                                <Select
+                                  value={(lesson.visibility || 'private')}
+                                  onValueChange={(v) => updateLessonField(index, 'visibility', v)}
+                                >
+                                  <SelectTrigger className="border-gray-200">
+                                    <SelectValue placeholder={language === 'ar' ? 'اختر الحالة' : 'Select visibility'} />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="private">{language === 'ar' ? 'خاص' : 'Private'}</SelectItem>
+                                    <SelectItem value="public">{language === 'ar' ? 'علني' : 'Public'}</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              <div>
+                                {(() => {
+                                  const now = new Date();
+                                  const hasSchedule = !!lesson.publishAt;
+                                  const d = hasSchedule ? new Date(lesson.publishAt) : null;
+                                  const isFuture = d ? d > now : false;
+                                  if (!hasSchedule || !isFuture) return null; // إخفاء العرض والتحكم بعد ظهوره
+                                  return (
+                                    <>
+                                      <div className="text-sm text-gray-600">
+                                        {(() => {
+                                          const dd = new Date(lesson.publishAt);
+                                          const h24 = dd.getHours();
+                                          const p = h24 >= 12 ? (language === 'ar' ? 'م' : 'PM') : (language === 'ar' ? 'ص' : 'AM');
+                                          const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
+                                          const mm = String(dd.getMinutes()).padStart(2,'0');
+                                          return (language === 'ar' ? 'موعد العرض: ' : 'Scheduled: ') + dd.toLocaleDateString() + ` ${h12}:${mm} ${p}`;
+                                        })()}
+                                      </div>
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="mt-2"
+                                        onClick={() => {
+                                          setScheduleEditingIndex(index);
+                                          const dd = lesson.publishAt ? new Date(lesson.publishAt) : new Date();
+                                          let h = dd.getHours();
+                                          const period = h >= 12 ? 'pm' : 'am';
+                                          h = h % 12;
+                                          setScheduledHour(h === 0 ? 12 : h);
+                                          setScheduledMinute(dd.getMinutes());
+                                          setScheduledPeriod(period as 'am' | 'pm');
+                                        }}
+                                      >
+                                        {language === 'ar' ? 'تغيير موعد العرض' : 'Change Schedule'}
+                                      </Button>
+                                    </>
+                                  );
+                                })()}
+                                {scheduleEditingIndex === index && (() => {
+                                  const now = new Date();
+                                  const hasSchedule = !!lesson.publishAt;
+                                  const d = hasSchedule ? new Date(lesson.publishAt) : null;
+                                  const isFuture = d ? d > now : false;
+                                  if (!hasSchedule || !isFuture) return null;
+                                  return (
+                                  <div className={language === 'ar' ? 'mt-3 flex flex-col items-end gap-2' : 'mt-3 flex flex-col items-start gap-2'}>
+                                    <div className="w-56">
+                                      <Calendar
+                                        className="p-2"
+                                        classNames={{
+                                          head_cell: "w-7 text-[0.75rem]",
+                                          day: "h-7 w-7 p-0 font-normal aria-selected:opacity-100",
+                                          nav_button: "h-6 w-6 bg-transparent p-0 opacity-50 hover:opacity-100",
+                                        }}
+                                        selected={lesson.publishAt ? new Date(lesson.publishAt) : undefined}
+                                        onSelect={(d) => {
+                                          if (!d) { return; }
+                                          const base = new Date(d);
+                                          let h12 = scheduledHour % 12;
+                                          if (scheduledPeriod === 'pm') h12 += 12;
+                                          base.setHours(h12, scheduledMinute, 0, 0);
+                                          updateLessonField(index, 'publishAt', base.toISOString());
+                                        }}
+                                        mode="single"
+                                      />
+                                    </div>
+                                    <div className={language === 'ar' ? 'flex items-center gap-2 flex-row-reverse' : 'flex items-center gap-2'}>
+                                      <div className="w-20">
+                                        <Select value={String(scheduledHour)} onValueChange={(v) => {
+                                          const hv = Number(v);
+                                          setScheduledHour(hv);
+                                          const current = lesson.publishAt ? new Date(lesson.publishAt) : new Date();
+                                          let h12 = hv % 12;
+                                          if (scheduledPeriod === 'pm') h12 += 12;
+                                          current.setHours(h12, scheduledMinute, 0, 0);
+                                          updateLessonField(index, 'publishAt', current.toISOString());
+                                        }}>
+                                          <SelectTrigger>
+                                            <SelectValue placeholder={language === 'ar' ? 'ساعة' : 'Hour'} />
+                                          </SelectTrigger>
+                                          <SelectContent>
+                                            {[1,2,3,4,5,6,7,8,9,10,11,12].map((h) => (
+                                              <SelectItem key={h} value={String(h)}>{h}</SelectItem>
+                                            ))}
+                                          </SelectContent>
+                                        </Select>
+                                      </div>
+                                      <div className="w-20">
+                                        <Select value={String(scheduledMinute)} onValueChange={(v) => {
+                                          const mv = Number(v);
+                                          setScheduledMinute(mv);
+                                          const current = lesson.publishAt ? new Date(lesson.publishAt) : new Date();
+                                          let h12 = scheduledHour % 12;
+                                          if (scheduledPeriod === 'pm') h12 += 12;
+                                          current.setHours(h12, mv, 0, 0);
+                                          updateLessonField(index, 'publishAt', current.toISOString());
+                                        }}>
+                                          <SelectTrigger>
+                                            <SelectValue placeholder={language === 'ar' ? 'دقيقة' : 'Minute'} />
+                                          </SelectTrigger>
+                                          <SelectContent>
+                                            {[0,5,10,15,20,25,30,35,40,45,50,55].map((m) => (
+                                              <SelectItem key={m} value={String(m)}>{String(m).padStart(2,'0')}</SelectItem>
+                                            ))}
+                                          </SelectContent>
+                                        </Select>
+                                      </div>
+                                      <div className="w-20">
+                                        <Select value={scheduledPeriod} onValueChange={(v) => {
+                                          const pv = v === 'pm' ? 'pm' : 'am';
+                                          setScheduledPeriod(pv as 'am' | 'pm');
+                                          const current = lesson.publishAt ? new Date(lesson.publishAt) : new Date();
+                                          let h12 = scheduledHour % 12;
+                                          if (pv === 'pm') h12 += 12;
+                                          current.setHours(h12, scheduledMinute, 0, 0);
+                                          updateLessonField(index, 'publishAt', current.toISOString());
+                                        }}>
+                                          <SelectTrigger>
+                                            <SelectValue />
+                                          </SelectTrigger>
+                                          <SelectContent>
+                                            <SelectItem value="am">{language === 'ar' ? 'ص' : 'AM'}</SelectItem>
+                                            <SelectItem value="pm">{language === 'ar' ? 'م' : 'PM'}</SelectItem>
+                                          </SelectContent>
+                                        </Select>
+                                      </div>
+                                    </div>
+                                  </div>
+                                );})()}
                               </div>
                             </div>
+                          </div>
                           ))}
                         </div>
                       )}

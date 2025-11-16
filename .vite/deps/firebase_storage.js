@@ -14,7 +14,7 @@ import {
   registerVersion,
   updateEmulatorBanner
 } from "./chunk-GPANZTN3.js";
-import "./chunk-4MBMRILA.js";
+import "./chunk-WOOG5QLI.js";
 
 // node_modules/@firebase/storage/dist/index.esm.js
 var DEFAULT_HOST = "firebasestorage.googleapis.com";

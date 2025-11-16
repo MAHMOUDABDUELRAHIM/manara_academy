@@ -30,7 +30,7 @@ import {
   registerVersion,
   updateEmulatorBanner
 } from "./chunk-GPANZTN3.js";
-import "./chunk-4MBMRILA.js";
+import "./chunk-WOOG5QLI.js";
 
 // node_modules/firebase/node_modules/@firebase/auth/dist/esm/index-9ccb475d.js
 var FactorId = {

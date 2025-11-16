@@ -103,14 +103,25 @@ export const CoursePage = () => {
         // Get student progress
         const progress = await StudentService.getCourseProgress(user.uid, courseId);
         
+        // إظهار دروس علنية فقط (والدروس المجدولة التي حان موعدها)
+        const now = new Date();
+        const rawLessons: any[] = Array.isArray(courseData.lessons) ? courseData.lessons : [];
+        const visibleLessonsRaw = rawLessons.filter((l: any) => {
+          const vis = (l?.visibility || 'public');
+          const at = l?.publishAt ? new Date(l.publishAt) : null;
+          if (vis === 'public') return true;
+          if (vis === 'scheduled') return !!at && at <= now;
+          return false; // private always hidden
+        });
+
         // Process lessons with completion status
-        const lessonsWithProgress = courseData.lessons?.map((lesson: any, index: number) => ({
+        const lessonsWithProgress = visibleLessonsRaw.map((lesson: any, index: number) => ({
           ...lesson,
           id: lesson.id || `lesson-${index}`,
           order: lesson.order || index + 1,
           isCompleted: progress?.completedLessons?.includes(lesson.id) || false,
-          isLocked: index > 0 && !(progress?.completedLessons?.includes(courseData.lessons[index - 1]?.id) || index === 0)
-        })) || [];
+          isLocked: index > 0 && !(progress?.completedLessons?.includes(visibleLessonsRaw[index - 1]?.id) || index === 0)
+        }));
 
         const courseWithProgress = {
           ...courseData,

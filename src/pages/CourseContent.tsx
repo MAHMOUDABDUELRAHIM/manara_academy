@@ -178,7 +178,18 @@ const CourseContent = () => {
         }
         if (!isMounted) return;
         setCourse(courseData);
-        setLessons(courseData.lessons || []);
+        {
+          const now = new Date();
+          const raw = Array.isArray(courseData.lessons) ? courseData.lessons : [];
+          const visible = raw.filter((l: any) => {
+            const vis = (l?.visibility || 'public');
+            const at = l?.publishAt ? new Date(l.publishAt) : null;
+            if (vis === 'public') return true;
+            if (vis === 'scheduled') return !!at && at <= now;
+            return false; // private hidden regardless of publishAt
+          });
+          setLessons(visible);
+        }
 
         // Fetch scheduled exams for this course (to show countdown before opening)
         try {

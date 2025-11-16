@@ -165,7 +165,7 @@ export const TeacherSidebar = ({ className, isSubscriptionApproved = false }: Te
       {/* Sidebar */}
       <aside 
         className={cn(
-          "fixed left-0 top-0 bottom-16 bg-white border-r border-gray-200 transition-all duration-300 z-40",
+          "fixed left-0 top-0 bottom-16 bg-white transition-all duration-300 z-40",
           "flex flex-col",
           isCollapsed ? "w-16" : "w-64",
           // Mobile styles

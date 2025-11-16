@@ -16,7 +16,7 @@ import {
   registerVersion,
   validateIndexedDBOpenable
 } from "./chunk-GPANZTN3.js";
-import "./chunk-4MBMRILA.js";
+import "./chunk-WOOG5QLI.js";
 
 // node_modules/@firebase/installations/dist/esm/index.esm.js
 var name = "@firebase/installations";

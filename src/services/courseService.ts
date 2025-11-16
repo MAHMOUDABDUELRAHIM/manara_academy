@@ -343,6 +343,8 @@ export class CourseService {
     description: string;
     videoUrl?: string;
     order?: number;
+    visibility?: 'private' | 'public' | 'scheduled';
+    publishAt?: string; // ISO time for scheduled/public instant
   }): Promise<string> {
     try {
       // الحصول على الكورس الحالي
@@ -366,6 +368,8 @@ export class CourseService {
         order: lessonData.order || currentLessons.length + 1,
         duration: 0, // يمكن تحديثه لاحقاً
         isCompleted: false,
+        visibility: (lessonData.visibility || 'private'),
+        publishAt: lessonData.publishAt || null,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
       };
@@ -380,19 +384,21 @@ export class CourseService {
         updatedAt: serverTimestamp()
       });
 
-      // إرسال إشعار للطلاب الملتحقين بهذه الدورة عن الدرس الجديد
-      try {
-        const teacherId = courseData.instructorId || courseData.teacherId || '';
-        const teacherName = courseData.instructorName || courseData.teacherName || '';
-        await NotificationService.createLessonNotificationsForCourseStudents(
-          courseId,
-          courseData.title,
-          newLesson.title,
-          teacherId,
-          teacherName
-        );
-      } catch (notifyError) {
-        console.error('Error sending lesson notifications:', notifyError);
+      // إرسال إشعار للطلاب فقط إذا كان الدرس علني عند الإضافة
+      if (newLesson.visibility === 'public') {
+        try {
+          const teacherId = courseData.instructorId || courseData.teacherId || '';
+          const teacherName = courseData.instructorName || courseData.teacherName || '';
+          await NotificationService.createLessonNotificationsForCourseStudents(
+            courseId,
+            courseData.title,
+            newLesson.title,
+            teacherId,
+            teacherName
+          );
+        } catch (notifyError) {
+          console.error('Error sending lesson notifications:', notifyError);
+        }
       }
 
       console.log('تم إضافة الدرس بنجاح:', newLesson.id);

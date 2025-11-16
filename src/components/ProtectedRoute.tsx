@@ -284,7 +284,8 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, requiredRole,
           '/teacher-dashboard/payouts',
           '/teacher-dashboard/assessments',
         ];
-        const tryingRestricted = restrictedPaths.some((p) => location.pathname.startsWith(p));
+        const isAddLessonRoute = /^\/teacher-dashboard\/courses\/[^\/]+\/add-lesson/.test(location.pathname);
+        const tryingRestricted = restrictedPaths.some((p) => location.pathname.startsWith(p)) && !isAddLessonRoute;
         if (tryingRestricted) {
           // Redirect to teacher dashboard and focus pricing section
           return <Navigate to={`/teacher-dashboard?blocked=trial#pricing`} replace />;
@@ -300,7 +301,8 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, requiredRole,
       '/teacher-dashboard/payouts',
       '/teacher-dashboard/assessments',
     ];
-  const tryingSubRestricted = subscriptionRestrictedPaths.some((p) => location.pathname.startsWith(p));
+  const isAddLessonRoute = /^\/teacher-dashboard\/courses\/[^\/]+\/add-lesson/.test(location.pathname);
+  const tryingSubRestricted = subscriptionRestrictedPaths.some((p) => location.pathname.startsWith(p)) && !isAddLessonRoute;
   if (tryingSubRestricted) {
     if (subLoading) {
         return (

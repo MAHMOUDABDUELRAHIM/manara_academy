@@ -19,6 +19,7 @@ import {
   HardDrive,
   Copy
 } from "lucide-react";
+import { Trash2, RefreshCcw } from "lucide-react";
 import { Zap, Calendar as CalendarIcon } from "lucide-react";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -69,7 +70,15 @@ export const AddLesson = () => {
   const [scheduledPeriod, setScheduledPeriod] = useState<'am' | 'pm'>("am");
   const storageKey = `addLesson:${courseId}`;
   const [replacePrev, setReplacePrev] = useState<{ provider: 's3' | 'firebase' | null, url: string | null, path: string | null, size: number } | null>(null);
+  const [localPreviewUrl, setLocalPreviewUrl] = useState<string | null>(null);
+  const [showUploadOverlay, setShowUploadOverlay] = useState<boolean>(false);
+  const [showCompletionCheck, setShowCompletionCheck] = useState<boolean>(false);
+  const [overlayFadeOut, setOverlayFadeOut] = useState<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [remainingSeconds, setRemainingSeconds] = useState<number | null>(null);
+  const lastLoadedRef = useRef<number>(0);
+  const lastTimeRef = useRef<number>(0);
+  const speedEmaRef = useRef<number>(0);
 
   useEffect(() => {
     try {
@@ -172,6 +181,7 @@ export const AddLesson = () => {
       }
     } catch {}
     setLessonData(prev => ({ ...prev, videoFile: file }));
+    try { const obj = URL.createObjectURL(file); setLocalPreviewUrl(obj); } catch {}
     uploadVideoToS3(file);
   };
 
@@ -186,114 +196,135 @@ export const AddLesson = () => {
 
   const uploadVideoToS3 = async (file: File) => {
     setIsUploading(true);
+    setShowUploadOverlay(true);
     setUploadProgress(0);
+    setRemainingSeconds(null);
+    lastLoadedRef.current = 0;
+    lastTimeRef.current = Date.now();
+    speedEmaRef.current = 0;
     const apiBase = (typeof window !== 'undefined'
       ? (localStorage.getItem('apiBase') || 'http://127.0.0.1:8000')
       : 'http://127.0.0.1:8000');
-    const endpoint = `${apiBase}/api/upload-s3-video`;
-    const form = new FormData();
-    form.append('video', file);
-    if (lessonData.title) form.append('title', lessonData.title);
+    const presignEndpoint = `${apiBase}/api/get-s3-presigned-put`;
+    const presignRes = await fetch(presignEndpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: lessonData.title || '', filename: file.name }) });
+    if (!presignRes.ok) {
+      setIsUploading(false);
+      toast.error(language === 'ar' ? 'تعذر الحصول على رابط الرفع.' : 'Failed to get upload link.');
+      return;
+    }
+    const presignData = await presignRes.json();
+    if (!presignData?.put_url || !presignData?.key) {
+      setIsUploading(false);
+      toast.error(language === 'ar' ? 'رابط الرفع غير صالح.' : 'Invalid upload link.');
+      return;
+    }
 
     try {
       const xhr = new XMLHttpRequest();
-      xhr.open('POST', endpoint, true);
+      xhr.open('PUT', presignData.put_url, true);
       // If you need cookies, set withCredentials = true; not needed here
-      xhr.responseType = 'json';
+      xhr.responseType = 'text';
+      xhr.timeout = 300000;
 
       let fallbackTimer: number | null = null;
       xhr.upload.onprogress = (e: ProgressEvent) => {
         if (e.lengthComputable && e.total > 0) {
           const percent = Math.min(100, Math.round((e.loaded / e.total) * 100));
           setUploadProgress(percent);
-        } else {
-          // Fallback: gently tick progress to reassure user during unknown length uploads
-          if (fallbackTimer === null) {
-            fallbackTimer = window.setInterval(() => {
-              setUploadProgress(prev => (prev < 95 ? prev + 1 : prev));
-            }, 300);
+          const now = Date.now();
+          const dt = (now - lastTimeRef.current) / 1000;
+          const db = e.loaded - lastLoadedRef.current;
+          if (dt > 0 && db > 0) {
+            const inst = db / dt;
+            speedEmaRef.current = speedEmaRef.current > 0 ? (speedEmaRef.current * 0.8 + inst * 0.2) : inst;
+            const remaining = Math.max(0, Math.round((e.total - e.loaded) / Math.max(1, speedEmaRef.current)));
+            setRemainingSeconds(remaining > 0 && percent < 100 ? remaining : null);
           }
+          lastTimeRef.current = now;
+          lastLoadedRef.current = e.loaded;
         }
       };
 
-      const clearFallback = () => {
-        if (fallbackTimer !== null) {
-          window.clearInterval(fallbackTimer);
-          fallbackTimer = null;
-        }
-      };
+      const clearFallback = () => {};
 
       xhr.onerror = () => {
         clearFallback();
-        uploadToFirebase(file);
+        setIsUploading(false);
+        setUploadedVideoUrl(null);
+        setRemainingSeconds(null);
+        toast.error(language === 'ar' ? 'فشل رفع الفيديو إلى الاستضافة.' : 'Failed to upload video to hosting.');
       };
       xhr.onabort = () => {
         clearFallback();
         setIsUploading(false);
         setUploadedVideoUrl(null);
+        setRemainingSeconds(null);
         toast.error(language === 'ar' ? 'تم إلغاء عملية الرفع.' : 'Upload was aborted.');
       };
       xhr.ontimeout = () => {
         clearFallback();
         setIsUploading(false);
         setUploadedVideoUrl(null);
+        setRemainingSeconds(null);
         toast.error(language === 'ar' ? 'انتهت مهلة الاتصال أثناء الرفع.' : 'Upload timed out.');
       };
 
       xhr.onload = () => {
         clearFallback();
         const status = xhr.status;
-        let data: any = null;
-        try {
-          data = typeof xhr.response === 'object' ? xhr.response : JSON.parse(xhr.responseText);
-        } catch (e) {
-          // ignore parse error
-        }
-
-        if (status >= 200 && status < 300 && data?.success) {
+        if (status >= 200 && status < 300) {
           setUploadProgress(100);
           setIsUploading(false);
-          setUploadedVideoUrl(data.url);
+          setRemainingSeconds(null);
+          setUploadedVideoUrl(presignData.url || null);
           setUploadedVideoProvider('s3');
           setUploadedVideoSize(file.size);
-          setUploadedVideoPath(data?.key || null);
+          setUploadedVideoPath(presignData.key || null);
+          setShowCompletionCheck(true);
+          setTimeout(() => { setOverlayFadeOut(true); setTimeout(() => { setShowCompletionCheck(false); setShowUploadOverlay(false); setOverlayFadeOut(false); }, 400); }, 6000);
           try {
-            const payload = { title: lessonData.title, description: lessonData.description, uploadedVideoUrl: data.url, uploadedVideoProvider: 's3', uploadedVideoSize: file.size, uploadedVideoPath: (data?.key || null) };
+            const payload = { title: lessonData.title, description: lessonData.description, uploadedVideoUrl: presignData.url || null, uploadedVideoProvider: 's3', uploadedVideoSize: file.size, uploadedVideoPath: (presignData.key || null) };
             localStorage.setItem(storageKey, JSON.stringify(payload));
           } catch {}
           toast.success(language === 'ar' ? 'تم رفع الفيديو بنجاح!' : 'Video uploaded successfully!');
+          try { if (localPreviewUrl) { URL.revokeObjectURL(localPreviewUrl); setLocalPreviewUrl(null); } } catch {}
           try {
-            const prevRaw = localStorage.getItem('teacherUploadOffsetBytes');
-            const prev = prevRaw ? Number(prevRaw) : 0;
-            localStorage.setItem('teacherUploadOffsetBytes', String(prev));
+              const prevS3Raw = localStorage.getItem('teacherS3UsageBytes');
+              const prevS3 = prevS3Raw ? Number(prevS3Raw) : 0;
+              const nextS3 = prevS3 + file.size;
+              localStorage.setItem('teacherS3UsageBytes', String(nextS3));
+              const lastRaw = localStorage.getItem('lastStorageUsedBytes');
+              const last = lastRaw ? Number(lastRaw) : 0;
+              const nextLast = last + file.size;
+              localStorage.setItem('lastStorageUsedBytes', String(nextLast));
+              window.dispatchEvent(new CustomEvent('teacher-storage-updated', { detail: { addedBytes: file.size } }));
+              (async () => {
+                const t = user?.uid ? await TeacherService.getTeacherByUid(user.uid).catch(() => null) : null;
+                const teacherId = (t as any)?.id || user?.uid || null;
+               if (teacherId) {
+                  await updateDoc(doc(db, 'teachers', teacherId), {
+                    s3UsageBytes: increment(file.size),
+                    updatedAt: new Date().toISOString(),
+                  });
+                  try {
+                    const rawGb = localStorage.getItem('approvedStorageGB');
+                    const baseGb = rawGb ? Number(rawGb) : 0;
+                    const extraRaw = localStorage.getItem('extraStorageGB');
+                    const extraGb = extraRaw ? Number(extraRaw) : 0;
+                    const capGb = (isNaN(baseGb) ? 0 : baseGb) + (isNaN(extraGb) ? 0 : extraGb);
+                    const lastRaw = localStorage.getItem('lastStorageUsedBytes');
+                    const lastUsed = lastRaw ? Number(lastRaw) : 0;
+                    const baselineRaw = localStorage.getItem('usageBaselineBytes');
+                    const baseline = baselineRaw ? Number(baselineRaw) : 0;
+                    const usedSinceReset = Math.max(0, lastUsed - (isNaN(baseline) ? 0 : baseline));
+                    const usedGb = usedSinceReset / (1024 * 1024 * 1024);
+                    const pct = capGb > 0 ? Math.min(100, Math.max(0, (usedGb / capGb) * 100)) : 0;
+                    await updateDoc(doc(db, 'teachers', teacherId), { storageOver95Pct: pct >= 95, updatedAt: new Date().toISOString() });
+                  } catch {}
+                }
+              })();
           } catch {}
-          try {
-            const prevS3Raw = localStorage.getItem('teacherS3UsageBytes');
-            const prevS3 = prevS3Raw ? Number(prevS3Raw) : 0;
-            const nextS3 = prevS3 + file.size;
-            localStorage.setItem('teacherS3UsageBytes', String(nextS3));
-          } catch {}
-          try {
-            window.dispatchEvent(new CustomEvent('teacher-storage-updated', { detail: { addedBytes: file.size } }));
-          } catch {}
-          try {
-            const lastRaw = localStorage.getItem('lastStorageUsedBytes');
-            const last = lastRaw ? Number(lastRaw) : 0;
-            const nextLast = last + file.size;
-            localStorage.setItem('lastStorageUsedBytes', String(nextLast));
-          } catch {}
-          try {
-            (async () => {
-              const t = user?.uid ? await TeacherService.getTeacherByUid(user.uid).catch(() => null) : null;
-              const teacherId = (t as any)?.id || user?.uid || null;
-              if (teacherId) {
-                await updateDoc(doc(db, 'teachers', teacherId), {
-                  s3UsageBytes: increment(file.size),
-                  updatedAt: new Date().toISOString(),
-                });
-              }
-            })();
-          } catch {}
+          
           try {
             (async () => {
               try {
@@ -311,40 +342,59 @@ export const AddLesson = () => {
           } catch {}
           setReplacePrev(null);
         } else {
-          uploadToFirebase(file);
+          setIsUploading(false);
+          setUploadedVideoUrl(null);
+          setRemainingSeconds(null);
+          const msg = (language === 'ar' ? 'فشل رفع الفيديو إلى الاستضافة.' : 'Failed to upload video to hosting.');
+          toast.error(msg);
         }
       };
 
-      xhr.send(form);
+      xhr.send(file);
       setUploadProgress((prev) => (prev < 1 ? 1 : prev));
       if (fallbackTimer === null) {
-        fallbackTimer = window.setInterval(() => {
-          setUploadProgress(prev => (prev < 95 ? prev + 1 : prev));
-        }, 300);
       }
     } catch (err) {
-      uploadToFirebase(file);
+      setIsUploading(false);
+      toast.error(language === 'ar' ? 'حدث خطأ أثناء طلب رابط الرفع.' : 'Error requesting upload link.');
     }
   };
 
   const uploadToFirebase = (file: File) => {
     try {
       setIsUploading(true);
+      setRemainingSeconds(null);
+      lastLoadedRef.current = 0;
+      lastTimeRef.current = Date.now();
+      speedEmaRef.current = 0;
       const path = `lesson-files/${courseId}/${Date.now()}_${file.name}`;
       const ref = storageRef(storage, path);
       const task = uploadBytesResumable(ref, file);
       task.on('state_changed', (snapshot) => {
         const percent = Math.min(100, Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100));
-        setUploadProgress((prev) => Math.max(prev, percent));
+        setUploadProgress(percent);
+        const now = Date.now();
+        const dt = (now - lastTimeRef.current) / 1000;
+        const db = snapshot.bytesTransferred - lastLoadedRef.current;
+        if (dt > 0 && db > 0) {
+          const inst = db / dt;
+          speedEmaRef.current = speedEmaRef.current > 0 ? (speedEmaRef.current * 0.8 + inst * 0.2) : inst;
+          const remaining = Math.max(0, Math.round((snapshot.totalBytes - snapshot.bytesTransferred) / Math.max(1, speedEmaRef.current)));
+          setRemainingSeconds(remaining > 0 && percent < 100 ? remaining : null);
+        }
+        lastTimeRef.current = now;
+        lastLoadedRef.current = snapshot.bytesTransferred;
       }, (error: any) => {
         setIsUploading(false);
         setUploadedVideoUrl(null);
+        setRemainingSeconds(null);
         toast.error(language === 'ar' ? 'فشل رفع الفيديو إلى التخزين.' : 'Failed to upload video to storage.');
       }, async () => {
         try {
           const url = await getDownloadURL(task.snapshot.ref);
           setUploadProgress(100);
           setUploadedVideoUrl(url);
+          setRemainingSeconds(null);
           setUploadedVideoProvider('firebase');
           setUploadedVideoSize(file.size);
           setUploadedVideoPath(path);
@@ -393,7 +443,7 @@ export const AddLesson = () => {
   };
 
   const handleDeleteVideo = async () => {
-    if (!uploadedVideoUrl || !uploadedVideoProvider) return;
+    if (!uploadedVideoProvider) return;
     try {
       const size = uploadedVideoSize || 0;
       const apiBaseRaw = (typeof window !== 'undefined') ? (localStorage.getItem('apiBase') || '') : '';
@@ -403,13 +453,15 @@ export const AddLesson = () => {
       };
       if (uploadedVideoProvider === 's3') {
         const endpoint = `${apiBase}/api/delete-s3-video`;
-        const res = await fetch(endpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url: uploadedVideoUrl, key: uploadedVideoUrl ? deriveS3KeyFromUrl(uploadedVideoUrl) : undefined })
-        }).catch(() => null);
-        if (!res || !res.ok) {
-          try { toast.warning(language === 'ar' ? 'تعذر حذف الفيديو من S3، تم تنظيف الحالة محليًا.' : 'S3 delete failed; local state cleaned.'); } catch {}
+        if (uploadedVideoUrl) {
+          const res = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: uploadedVideoUrl, key: uploadedVideoUrl ? deriveS3KeyFromUrl(uploadedVideoUrl) : undefined })
+          }).catch(() => null);
+          if (!res || !res.ok) {
+            try { toast.warning(language === 'ar' ? 'تعذر حذف الفيديو من S3، تم تنظيف الحالة محليًا.' : 'S3 delete failed; local state cleaned.'); } catch {}
+          }
         }
       } else if (uploadedVideoProvider === 'firebase' && uploadedVideoPath) {
         try {
@@ -430,6 +482,7 @@ export const AddLesson = () => {
         const payload = { title: lessonData.title, description: lessonData.description, uploadedVideoUrl: null, uploadedVideoProvider: null, uploadedVideoSize: 0, uploadedVideoPath: null };
         localStorage.setItem(storageKey, JSON.stringify(payload));
       } catch {}
+      try { if (localPreviewUrl) { URL.revokeObjectURL(localPreviewUrl); setLocalPreviewUrl(null); } } catch {}
       toast.success(language === 'ar' ? 'تم حذف الفيديو.' : 'Video deleted.');
     } catch {
       toast.error(language === 'ar' ? 'فشل حذف الفيديو.' : 'Failed to delete video.');
@@ -541,6 +594,43 @@ export const AddLesson = () => {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
+                  {(() => {
+                    try {
+                      const rawGb = localStorage.getItem('approvedStorageGB');
+                      const baseGb = rawGb ? Number(rawGb) : 0;
+                      const extraRaw = localStorage.getItem('extraStorageGB');
+                      const extraGb = extraRaw ? Number(extraRaw) : 0;
+                      const capGb = (isNaN(baseGb) ? 0 : baseGb) + (isNaN(extraGb) ? 0 : extraGb);
+                      const lastRaw = localStorage.getItem('lastStorageUsedBytes');
+                      const lastUsed = lastRaw ? Number(lastRaw) : 0;
+                      const baselineRaw = localStorage.getItem('usageBaselineBytes');
+                      const baseline = baselineRaw ? Number(baselineRaw) : 0;
+                      const usedSinceReset = Math.max(0, lastUsed - (isNaN(baseline) ? 0 : baseline));
+                      const capBytes = capGb * 1024 * 1024 * 1024;
+                      const blocked = capGb > 0 && usedSinceReset >= capBytes;
+                      if (blocked) {
+                        return (
+                          <div className={`mb-4 rounded-md border border-amber-300 bg-amber-50 p-3 ${language === 'ar' ? 'text-right' : ''}`}>
+                            <div className={`flex ${language === 'ar' ? 'flex-row-reverse' : ''} items-center justify-between gap-3`}>
+                              <div className="flex items-center gap-2">
+                                <AlertCircle className="h-5 w-5 text-amber-600" />
+                                <span className="text-sm font-medium">
+                                  {language === 'ar'
+                                    ? 'الفيديو يتجاوز المساحة التخزينية المتوفرة لديك. قم بترقية الباقة أو شراء مساحة إضافية.'
+                                    : 'The video exceeds your available storage. Upgrade or buy add-on.'}
+                                </span>
+                              </div>
+                              <Link to="/teacher-dashboard/storage-addon" className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-amber-300 bg-amber-100 text-amber-700">
+                                <HardDrive className="h-4 w-4" />
+                                <span>{language === 'ar' ? 'شراء مساحة إضافية' : 'Buy add-on'}</span>
+                              </Link>
+                            </div>
+                          </div>
+                        );
+                      }
+                    } catch {}
+                    return null;
+                  })()}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
                     <div className="space-y-4">
                       <div>
@@ -738,13 +828,14 @@ export const AddLesson = () => {
                       </div>
                     </div>
                     <div className="flex justify-end">
-                      <div className="w-80">
-                        {!(lessonData.videoFile || uploadedVideoUrl) ? (
-                          <div 
-                            className="border-2 border-dashed border-gray-200 rounded-xl p-10 text-center hover:border-[#2c4656] bg-gray-50 transition-colors"
-                            onDragOver={(e) => { e.preventDefault(); }}
-                            onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer?.files?.[0]; if (f) { processVideoFile(f); } }}
-                          >
+                              <div className="w-80">
+                                
+                                {!(lessonData.videoFile || uploadedVideoUrl || localPreviewUrl || uploadedVideoProvider) ? (
+                                  <div 
+                                    className="border-2 border-dashed border-gray-200 rounded-xl p-10 text-center hover:border-[#2c4656] bg-gray-50 transition-colors"
+                                    onDragOver={(e) => { e.preventDefault(); }}
+                                    onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer?.files?.[0]; if (f) { processVideoFile(f); } }}
+                                  >
                             <input
                               type="file"
                               accept="video/*"
@@ -786,7 +877,7 @@ export const AddLesson = () => {
                               </div>
                             </label>
                             {(() => {
-                                try {
+                              try {
                                 const rawGb = localStorage.getItem('approvedStorageGB');
                                 const baseGb = rawGb ? Number(rawGb) : 0;
                                 const extraRaw = localStorage.getItem('extraStorageGB');
@@ -794,12 +885,16 @@ export const AddLesson = () => {
                                 const capGb = (isNaN(baseGb) ? 0 : baseGb) + (isNaN(extraGb) ? 0 : extraGb);
                                 const lastRaw = localStorage.getItem('lastStorageUsedBytes');
                                 const lastUsed = lastRaw ? Number(lastRaw) : 0;
+                                const baselineRaw = localStorage.getItem('usageBaselineBytes');
+                                const baseline = baselineRaw ? Number(baselineRaw) : 0;
+                                const usedSinceReset = Math.max(0, lastUsed - (isNaN(baseline) ? 0 : baseline));
                                 const capBytes = capGb * 1024 * 1024 * 1024;
-                                const blocked = capGb > 0 && lastUsed >= capBytes;
+                                const blocked = capGb > 0 && usedSinceReset >= capBytes;
+                                const warn80 = capGb > 0 && usedSinceReset >= Math.floor(capBytes * 0.8) && usedSinceReset < capBytes;
                                 if (blocked) {
                                   return (
                                     <div className="mt-3 text-sm text-red-600">
-                                      {language === 'ar' 
+                                      {language === 'ar'
                                         ? <>
                                             لقد وصلت إلى الحد المسموح به من المساحة.
                                             <Link to="/teacher-dashboard/storage-addon" className="inline-flex items-center gap-1 px-2 py-1 ml-2 rounded-md border border-red-200 bg-red-50 text-red-600">
@@ -817,63 +912,112 @@ export const AddLesson = () => {
                                     </div>
                                   );
                                 }
+                                if (warn80) {
+                                  return (
+                                    <div className="mt-3 text-sm text-amber-600">
+                                      {language === 'ar'
+                                        ? <>
+                                            لقد اقتربت من الحد المسموح به للمساحة التخزينية (80%).
+                                            <Link to="/teacher-dashboard/storage-addon" className="inline-flex items-center gap-1 px-2 py-1 ml-2 rounded-md border border-amber-200 bg-amber-50 text-amber-700">
+                                              <HardDrive className="h-4 w-4" />
+                                              <span>شراء مساحة إضافية</span>
+                                            </Link>
+                                          </>
+                                        : <>
+                                            You are nearing the storage limit (80%).
+                                            <Link to="/teacher-dashboard/storage-addon" className="inline-flex items-center gap-1 px-2 py-1 ml-2 rounded-md border border-amber-200 bg-amber-50 text-amber-700">
+                                              <HardDrive className="h-4 w-4" />
+                                              <span>Buy additional storage</span>
+                                            </Link>
+                                          </>}
+                                    </div>
+                                  );
+                                }
                               } catch {}
                               return null;
                             })()}
                           </div>
                         ) : (
                           <>
-                            {isUploading && (
-                              <div className="rounded-lg overflow-hidden border border-gray-200 bg-white text-gray-900 mb-3">
-                                <div className="bg-black relative" style={{ aspectRatio: '16 / 9' }}>
-                                  <div className="absolute inset-0">
-                                    <div className="h-full bg-[#2c4656]/60" style={{ width: `${uploadProgress}%`, transition: 'width 200ms ease' }} />
-                                  </div>
-                                  <div className="absolute inset-0 flex items-center justify-center">
-                                    <FileVideo className="h-20 w-20 text-white" style={{ opacity: Math.max(0.2, 1 - uploadProgress / 100) }} />
-                                  </div>
-                                </div>
+                            {(!isUploading && (!!uploadedVideoProvider || uploadProgress >= 100)) && (
+                              <div className={`mb-2 flex items-center gap-2 ${language === 'ar' ? 'justify-end text-right' : ''}`}>
+                                <CheckCircle className="h-4 w-4 text-green-600" />
+                                <span className="text-sm text-green-700">{language === 'ar' ? 'تم رفع الفيديو بنجاح، أكمل باقي الإعدادات للنشر.' : 'Video uploaded successfully, complete the settings to publish.'}</span>
                               </div>
                             )}
-                            {uploadedVideoUrl && (
-                              <div className="rounded-lg overflow-hidden border border-gray-200 bg-white text-gray-900">
-                                <div className="bg-black" style={{ aspectRatio: '16 / 9' }}>
-                                  <video src={uploadedVideoUrl} controls className="w-full h-full object-contain" />
-                                </div>
-                                <div className={`p-3 flex items-start justify-between ${language === 'ar' ? 'flex-row-reverse text-right' : ''}`}>
-                                  <button
-                                    type="button"
-                                    onClick={() => { try { if (uploadedVideoUrl) { navigator.clipboard.writeText(uploadedVideoUrl); toast.success(language === 'ar' ? 'تم نسخ الرابط' : 'Link copied'); } } catch {} }}
-                                    className="p-2 rounded-md bg-gray-100 hover:bg-gray-200 text-gray-700"
-                                    aria-label={language === 'ar' ? 'نسخ الرابط' : 'Copy link'}
-                                  >
-                                    <Copy className="h-4 w-4" />
-                                  </button>
-                                  <div className="space-y-1"> 
-                                    <div className="text-sm text-gray-600">{language === 'ar' ? 'رابط الفيديو' : 'Video Link'}</div>
-                                    <a href={uploadedVideoUrl} target="_blank" rel="noreferrer" className="text-sm text-blue-600 hover:underline break-all">{uploadedVideoUrl}</a>
-                                    <div className="text-sm text-gray-600 mt-2">{language === 'ar' ? 'اسم الملف' : 'File Name'}</div>
-                                    <div className="text-sm text-gray-900 break-all">{lessonData.videoFile?.name || (uploadedVideoUrl ? uploadedVideoUrl.split('/').pop() : '')}</div>
+                            <div className="rounded-lg overflow-hidden border border-gray-200 bg-white text-gray-900">
+                              <div className="bg-black relative" style={{ aspectRatio: '16 / 9' }}>
+                                <video src={uploadedVideoUrl || localPreviewUrl || undefined} controls preload="metadata" className="w-full h-full object-contain" />
+                                {showUploadOverlay && (
+                                  <div className={`absolute inset-0 ${overlayFadeOut ? 'opacity-0' : 'opacity-100'} transition-opacity duration-500`}>
+                                    <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/40">
+                                      <div className="relative w-16 h-16 rounded-full" style={{ background: `conic-gradient(#3b82f6 ${uploadProgress * 3.6}deg, #1f2937 0deg)` }}>
+                                        <div className="absolute inset-1 rounded-full bg-black/70 flex items-center justify-center">
+                                          {showCompletionCheck ? (
+                                            <CheckCircle className="h-6 w-6 text-green-500" />
+                                          ) : (
+                                            <div className={`flex ${language === 'ar' ? 'flex-row-reverse' : ''} items-center gap-1`}>
+                                              <Upload className="h-4 w-4 text-white" />
+                                              <span className="text-white text-xs font-medium">{Math.round(uploadProgress)}%</span>
+                                            </div>
+                                          )}
+                                        </div>
+                                      </div>
+                                      {!showCompletionCheck && remainingSeconds !== null && (
+                                        <div className={`mt-3 text-white text-xs ${language === 'ar' ? 'text-right' : ''}`}>
+                                          <span>{language === 'ar' ? 'الوقت المتبقي:' : 'Remaining:'} {(() => {
+                                            const s = remainingSeconds || 0;
+                                            const h = Math.floor(s / 3600);
+                                            const m = Math.floor((s % 3600) / 60);
+                                            const sec = s % 60;
+                                            if (language === 'ar') {
+                                              if (h > 0) return `${h} ساعة ${m} دقيقة`;
+                                              if (m > 0) return `${m} دقيقة ${sec} ثانية`;
+                                              return `${sec} ثانية`;
+                                            } else {
+                                              if (h > 0) return `${h}h ${m}m`;
+                                              if (m > 0) return `${m}m ${sec}s`;
+                                              return `${sec}s`;
+                                            }
+                                          })()}</span>
+                                        </div>
+                                      )}
+                                      
+                                      {!showCompletionCheck && (
+                                        <div className="absolute bottom-0 left-0 right-0 h-2 bg-white/10">
+                                          <div className="h-full bg-blue-500" style={{ width: `${uploadProgress}%`, transition: 'width 200ms ease' }} />
+                                        </div>
+                                      )}
+                                    </div>
                                   </div>
-                                </div>
+                                )}
+                                
                               </div>
-                            )}
-                            <div className="mt-3 flex items-center gap-2">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => { setReplacePrev({ provider: uploadedVideoProvider, url: uploadedVideoUrl, path: uploadedVideoPath, size: uploadedVideoSize }); try { fileInputRef.current?.click(); } catch {} }}
-                                className="opacity-70 hover:opacity-100"
-                              >
-                                {language === 'ar' ? 'تغيير الفيديو' : 'Change Video'}
-                              </Button>
-                              <Button
-                                variant="destructive"
-                                size="sm"
-                                onClick={handleDeleteVideo}
-                              >
-                                {language === 'ar' ? 'حذف الفيديو' : 'Delete Video'}
-                              </Button>
+                              
+                            </div>
+                            <div className="mt-3 flex items-center justify-end gap-2">
+                              {(!isUploading && (uploadedVideoProvider || uploadedVideoUrl || uploadProgress >= 100)) && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => { setReplacePrev({ provider: uploadedVideoProvider, url: uploadedVideoUrl, path: uploadedVideoPath, size: uploadedVideoSize }); try { fileInputRef.current?.click(); } catch {} }}
+                                  className="flex items-center gap-2"
+                                >
+                                  <RefreshCcw className="h-4 w-4" />
+                                  {language === 'ar' ? 'استبدال الفيديو' : 'Replace Video'}
+                                </Button>
+                              )}
+                              {(!isUploading && (uploadedVideoProvider || uploadedVideoUrl)) && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={handleDeleteVideo}
+                                  className="flex items-center gap-2"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                  {language === 'ar' ? 'حذف الفيديو' : 'Delete Video'}
+                                </Button>
+                              )}
                             </div>
                           </>
                         )}
@@ -890,7 +1034,15 @@ export const AddLesson = () => {
             <div className="mt-8 flex justify-end">
               <Button
                 onClick={handlePublishLesson}
-                disabled={isPublishing || !lessonData.title || !lessonData.description || !uploadedVideoUrl}
+                disabled={
+                  isPublishing ||
+                  !lessonData.title ||
+                  !lessonData.description ||
+                  !(
+                    uploadedVideoUrl ||
+                    (!!uploadedVideoProvider && !isUploading)
+                  )
+                }
                 className="bg-[#2c4656] hover:bg-[#1e3240] text-white px-8 py-2 flex items-center gap-2"
               >
                 {isPublishing ? (

@@ -296,6 +296,9 @@ const PaymentsPayouts: React.FC = () => {
         approvedBy: auth.currentUser?.uid || null,
         approvedPeriodDays: Math.round(periodMs / (24 * 60 * 60 * 1000)),
         expiresAt: expiresDate,
+        planStorageGB: (typeof planDocData?.storageGB === 'number' ? planDocData.storageGB : null),
+        planAllowedSections: (planDocData?.allowedSections && typeof planDocData.allowedSections === 'object' ? planDocData.allowedSections : {}),
+        planSnapshotAt: serverTimestamp(),
       });
       try {
         if (teacherId) {

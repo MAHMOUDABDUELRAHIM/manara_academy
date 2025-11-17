@@ -6,7 +6,7 @@ import { TeacherService } from '../services/teacherService'
 import { toast } from 'sonner'
 import { Eye, EyeOff, LogIn, UserPlus, Globe, Mail, Lock, User, Search, Sun, Moon, Inbox, Loader2, Facebook, Instagram, Twitter, Linkedin, MessageCircle } from 'lucide-react'
 import { auth, db } from '@/firebase/config'
-import { doc, getDoc } from 'firebase/firestore'
+import { doc, getDoc, collection, query, where, getDocs, onSnapshot } from 'firebase/firestore'
 import { signOut } from 'firebase/auth'
 import { CourseService } from '@/services/courseService'
 import { Course } from '@/types/course'
@@ -89,6 +89,7 @@ export default function InvitePage() {
   const [heroTheme, setHeroTheme] = useState<'classic' | 'proBanner'>('classic')
   const [brandLogoScale, setBrandLogoScale] = useState<number>(1)
   const [brandNameScale, setBrandNameScale] = useState<number>(1)
+  const [serviceUnavailable, setServiceUnavailable] = useState<boolean>(false)
   // Readonly preview mode (opened from teacher editor)
   const params = new URLSearchParams(location.search)
   const isReadOnly = params.get('readonly') === '1' || params.get('readonly') === 'true'
@@ -148,6 +149,71 @@ useEffect(() => {
       try {
         const teacherData = await TeacherService.getTeacherProfile(teacherId)
         setTeacher(teacherData)
+        try {
+          let effectiveId = teacherId
+          try {
+            const proxy = (teacherData as any)?.proxyOf
+            if (typeof proxy === 'string' && proxy.length > 0) {
+              effectiveId = proxy
+            }
+          } catch {}
+          let validApproved = false
+          try {
+            const qAppr = query(collection(db, 'payments'), where('teacherId', '==', effectiveId), where('status', '==', 'approved'))
+            const snap = await getDocs(qAppr)
+            if (snap.size > 0) {
+              const docs = snap.docs.map(d => ({ id: d.id, data: d.data() as any }))
+              docs.sort((a, b) => {
+                const aApproved = a.data.approvedAt?.seconds || 0
+                const bApproved = b.data.approvedAt?.seconds || 0
+                const aCreated = a.data.createdAt?.seconds || 0
+                const bCreated = b.data.createdAt?.seconds || 0
+                if (aApproved !== bApproved) return bApproved - aApproved
+                return bCreated - aCreated
+              })
+              const latest = docs[0]?.data || null
+              const expiresAt = latest?.expiresAt?.toDate?.() || latest?.expiresAt || null
+              if (expiresAt instanceof Date) {
+                validApproved = Date.now() < expiresAt.getTime()
+              } else {
+                validApproved = true
+              }
+            }
+          } catch {}
+          let trialMs = 24 * 60 * 60 * 1000
+          try {
+            const tsnap = await getDoc(doc(db, 'settings', 'trial'))
+            if (tsnap.exists()) {
+              const data: any = tsnap.data()
+              const unit = data?.unit === 'minutes' ? 'minutes' : 'days'
+              const value = typeof data?.value === 'number' && data.value > 0 ? data.value : 1
+              trialMs = unit === 'days' ? value * 24 * 60 * 60 * 1000 : value * 60 * 1000
+            } else {
+              try {
+                const cached = localStorage.getItem('trialSettings')
+                if (cached) {
+                  const parsed = JSON.parse(cached)
+                  const unit = parsed?.unit === 'minutes' ? 'minutes' : 'days'
+                  const value = typeof parsed?.value === 'number' && parsed.value > 0 ? parsed.value : 1
+                  trialMs = unit === 'days' ? value * 24 * 60 * 60 * 1000 : value * 60 * 1000
+                }
+              } catch {}
+            }
+          } catch {}
+          let createdMs = 0
+          try {
+            const createdRaw: any = (teacherData as any)?.createdAt
+            if (typeof createdRaw === 'string') {
+              createdMs = new Date(createdRaw).getTime()
+            } else if (createdRaw?.seconds) {
+              createdMs = createdRaw.seconds * 1000
+            } else if (createdRaw instanceof Date) {
+              createdMs = createdRaw.getTime()
+            }
+          } catch {}
+          const trialExpired = !!createdMs && (Date.now() - createdMs >= trialMs)
+          setServiceUnavailable(!validApproved && trialExpired)
+        } catch {}
         
         // حفظ teacherId في localStorage للاستخدام بعد تسجيل الدخول
         if (teacherData?.uid) {
@@ -373,6 +439,62 @@ useEffect(() => {
 
     fetchTeacher()
   }, [teacherId, navigate, language])
+
+  useEffect(() => {
+    let unsub: (() => void) | null = null
+    let cancelled = false
+    const run = async () => {
+      try {
+        if (!teacherId) return
+        const tSnap = await getDoc(doc(db, 'teachers', teacherId))
+        const tData: any = tSnap.exists() ? tSnap.data() : null
+        const effectiveId: string = (typeof tData?.proxyOf === 'string' && tData.proxyOf.length > 0) ? tData.proxyOf : teacherId
+        let trialMs = 24 * 60 * 60 * 1000
+        try {
+          const tsnap = await getDoc(doc(db, 'settings', 'trial'))
+          if (tsnap.exists()) {
+            const d: any = tsnap.data()
+            const unit = d?.unit === 'minutes' ? 'minutes' : 'days'
+            const value = typeof d?.value === 'number' && d.value > 0 ? d.value : 1
+            trialMs = unit === 'days' ? value * 24 * 60 * 60 * 1000 : value * 60 * 1000
+          } else {
+            try {
+              const cached = localStorage.getItem('trialSettings')
+              if (cached) {
+                const parsed = JSON.parse(cached)
+                const unit = parsed?.unit === 'minutes' ? 'minutes' : 'days'
+                const value = typeof parsed?.value === 'number' && parsed.value > 0 ? parsed.value : 1
+                trialMs = unit === 'days' ? value * 24 * 60 * 60 * 1000 : value * 60 * 1000
+              }
+            } catch {}
+          }
+        } catch {}
+        let createdMs = 0
+        try {
+          const raw: any = tData?.createdAt
+          if (typeof raw === 'string') createdMs = new Date(raw).getTime()
+          else if (raw?.seconds) createdMs = raw.seconds * 1000
+          else if (raw instanceof Date) createdMs = raw.getTime()
+        } catch {}
+        const trialExpired = !!createdMs && (Date.now() - createdMs >= trialMs)
+        const qPayments = query(collection(db, 'payments'), where('teacherId', '==', effectiveId))
+        unsub = onSnapshot(qPayments, (snap) => {
+          const payments = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }))
+          const basePayments = payments.filter(p => p?.type !== 'storage_addon')
+          const approvedList = basePayments
+            .filter(p => p?.status === 'approved')
+            .sort((a, b) => ((b?.createdAt?.seconds || 0) - (a?.createdAt?.seconds || 0)))
+          const approvedP = approvedList[0]
+          const expApproved: any = approvedP?.expiresAt?.toDate?.() || approvedP?.expiresAt || null
+          const validApproved = expApproved instanceof Date ? (Date.now() < expApproved.getTime()) : !!approvedP
+          const hasActive = !!validApproved
+          if (!cancelled) setServiceUnavailable(!(hasActive) && trialExpired)
+        })
+      } catch {}
+    }
+    run()
+    return () => { cancelled = true; if (unsub) unsub() }
+  }, [teacherId])
 
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -603,6 +725,15 @@ useEffect(() => {
           className="fixed inset-0 z-[100]"
           style={{ background: 'transparent' }}
           onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
+          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+          onMouseUp={(e) => { e.preventDefault(); e.stopPropagation(); }}
+        />
+      )}
+      {serviceUnavailable && (
+        <div
+          className="fixed inset-0 z-[100]"
+          style={{ background: 'transparent' }}
+          onClick={(e) => { e.preventDefault(); e.stopPropagation(); toast.error(language === 'ar' ? 'الخدمة غير متوفرة في الوقت حالي' : 'Service is not available at the moment'); }}
           onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
           onMouseUp={(e) => { e.preventDefault(); e.stopPropagation(); }}
         />

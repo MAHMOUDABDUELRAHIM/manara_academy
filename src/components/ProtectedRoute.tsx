@@ -178,6 +178,30 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, requiredRole,
           } catch {}
         }
 
+        let adminCancelled = false;
+        try {
+          const qRejected = query(
+            collection(db, 'payments'),
+            where('teacherId', '==', effectiveTeacherId),
+            where('status', '==', 'rejected')
+          );
+          let rejSnap = await getDocs(qRejected);
+          if (rejSnap.size === 0 && user?.uid && user.uid !== effectiveTeacherId) {
+            const qRejectedByUser = query(
+              collection(db, 'payments'),
+              where('teacherId', '==', user.uid),
+              where('status', '==', 'rejected')
+            );
+            const snapRUser = await getDocs(qRejectedByUser);
+            if (snapRUser.size > 0) rejSnap = snapRUser;
+          }
+          if (rejSnap.size > 0) {
+            const docs = rejSnap.docs.map(d => d.data() as any);
+            adminCancelled = docs.some((d) => !!(d?.cancelledAt?.toDate?.() || d?.cancelledAt));
+          }
+        } catch {}
+        try { localStorage.setItem('adminCancelled', adminCancelled ? 'true' : 'false'); } catch {}
+
         const hasActiveSub = !!validApproved;
         if (!cancelled) setIsSubApproved(hasActiveSub);
         try { localStorage.setItem('hasActiveSubscription', hasActiveSub ? 'true' : 'false'); } catch {}
@@ -185,19 +209,21 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, requiredRole,
         // If approved, resolve plan's allowedSections to enforce feature/section-level access
         if (validApproved) {
           try {
-            // Use the latestData resolved above
             const latest = latestData;
-            let planDoc: any = null;
-            if (latest?.planId) {
-              const pSnap = await getDoc(doc(db, 'pricingPlans', latest.planId));
-              planDoc = pSnap.exists() ? pSnap.data() : null;
+            let sectionsObj: any = latest?.planAllowedSections || null;
+            if (!sectionsObj) {
+              let planDoc: any = null;
+              if (latest?.planId) {
+                const pSnap = await getDoc(doc(db, 'pricingPlans', latest.planId));
+                planDoc = pSnap.exists() ? pSnap.data() : null;
+              }
+              if (!planDoc && latest?.planName) {
+                const qByName = query(collection(db, 'pricingPlans'), where('name', '==', latest.planName));
+                const s2 = await getDocs(qByName);
+                planDoc = s2.docs[0]?.data() || null;
+              }
+              sectionsObj = planDoc?.allowedSections || {};
             }
-            if (!planDoc && latest?.planName) {
-              const qByName = query(collection(db, 'pricingPlans'), where('name', '==', latest.planName));
-              const s2 = await getDocs(qByName);
-              planDoc = s2.docs[0]?.data() || null;
-            }
-            const sectionsObj: any = planDoc?.allowedSections || {};
             const normalized: Record<string, string[]> = {};
             if (sectionsObj && typeof sectionsObj === 'object') {
               Object.keys(sectionsObj).forEach((k) => {
@@ -277,6 +303,9 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, requiredRole,
       } catch {}
       // Only block by trial if no approved subscription
       if (expired && !isSubApproved) {
+        let cancelledByAdmin = false;
+        try { cancelledByAdmin = localStorage.getItem('adminCancelled') === 'true'; } catch {}
+        if (!cancelledByAdmin) {
         const restrictedPaths = [
           '/teacher-dashboard/courses',
           '/teacher-dashboard/create-course',
@@ -289,6 +318,7 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, requiredRole,
         if (tryingRestricted) {
           // Redirect to teacher dashboard and focus pricing section
           return <Navigate to={`/teacher-dashboard?blocked=trial#pricing`} replace />;
+        }
         }
       }
     }

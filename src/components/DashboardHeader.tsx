@@ -14,7 +14,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useAuth } from "@/hooks/useAuth";
-import { Bell, LogOut, Settings, Crown, ChevronDown } from "lucide-react";
+import { Bell, LogOut, Settings, Crown, ChevronDown, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { Progress } from "@/components/ui/progress";
 import { TeacherService } from "@/services/teacherService";
@@ -137,8 +137,11 @@ export const DashboardHeader = ({
           const approvedP = approvedList[0];
           try {
             const had = approvedList.length > 0;
-            setHadApprovedSubscription(had);
-            try { localStorage.setItem('hadApprovedSubscription', had ? 'true' : 'false'); } catch {}
+            const cancelledList = basePayments.filter(p => p?.status === 'rejected' && (p?.cancelledAt?.toDate?.() || p?.cancelledAt));
+            const hadCancelled = cancelledList.length > 0;
+            const hadAny = had || hadCancelled;
+            setHadApprovedSubscription(hadAny);
+            try { localStorage.setItem('hadApprovedSubscription', hadAny ? 'true' : 'false'); } catch {}
           } catch {}
           const expApproved = approvedP?.expiresAt?.toDate?.() || approvedP?.expiresAt || null;
           const validApproved = expApproved instanceof Date ? (Date.now() < expApproved.getTime()) : !!approvedP;
@@ -242,7 +245,7 @@ export const DashboardHeader = ({
               } else if (isMonth) {
                 planPeriodMs = 30 * 24 * 60 * 60 * 1000;
               }
-              const sgb = typeof planDocData?.storageGB === 'number' ? planDocData.storageGB : undefined;
+              const sgb = (typeof approvedP?.planStorageGB === 'number' ? approvedP.planStorageGB : (typeof planDocData?.storageGB === 'number' ? planDocData.storageGB : undefined));
               if (typeof sgb === 'number') {
                 setApprovedStorageGB(sgb);
                 try { localStorage.setItem('approvedStorageGB', String(sgb)); } catch {}
@@ -272,6 +275,30 @@ export const DashboardHeader = ({
             }
             // storageGB is already set above based on planDocData or cleared if not available
             try {
+              const startMsImmediate = (() => {
+                try {
+                  if (validApproved && approvedP) {
+                    const d = approvedP?.approvedAt?.toDate?.() || approvedP?.approvedAt || approvedP?.createdAt?.toDate?.() || approvedP?.createdAt || null;
+                    return d instanceof Date ? d.getTime() : 0;
+                  }
+                  return 0;
+                } catch { return 0; }
+              })();
+              const prevStartRawImmediate = localStorage.getItem('lastResetStartMs') || '';
+              const prevStartMsImmediate = prevStartRawImmediate ? Number(prevStartRawImmediate) : 0;
+              if (startMsImmediate > 0 && startMsImmediate !== prevStartMsImmediate) {
+                localStorage.setItem('lastStorageUsedBytes', '0');
+                localStorage.setItem('usageResetAt', new Date(startMsImmediate).toISOString());
+                localStorage.setItem('lastResetStartMs', String(startMsImmediate));
+                try {
+                  await updateDoc(doc(db, 'teachers', teacherId), {
+                    usageResetAt: new Date(startMsImmediate).toISOString(),
+                    updatedAt: new Date().toISOString(),
+                  });
+                } catch {}
+              }
+            } catch {}
+            try {
               const used = await StorageService.getTeacherStorageUsageBytes(teacherId);
               let offset = 0;
               let s3Local = 0;
@@ -290,10 +317,38 @@ export const DashboardHeader = ({
               const baseRaw = localStorage.getItem('usageBaselineBytes');
               const base = baseRaw ? Number(baseRaw) : 0;
               const total = used + extra;
+              try {
+                const startMs = (() => {
+                  try {
+                    if (validApproved && approvedP) {
+                      const d = approvedP?.approvedAt?.toDate?.() || approvedP?.approvedAt || approvedP?.createdAt?.toDate?.() || approvedP?.createdAt || null;
+                      return d instanceof Date ? d.getTime() : 0;
+                    }
+                    return 0;
+                  } catch { return 0; }
+                })();
+                const lastStartRaw = localStorage.getItem('lastResetStartMs') || '';
+                const lastStartMs = lastStartRaw ? Number(lastStartRaw) : 0;
+                if (startMs > 0 && startMs !== lastStartMs) {
+                  localStorage.setItem('usageBaselineBytes', String(total));
+                  localStorage.setItem('lastStorageUsedBytes', '0');
+                  localStorage.setItem('usageResetAt', new Date(startMs).toISOString());
+                  localStorage.setItem('lastResetStartMs', String(startMs));
+                  try {
+                    await updateDoc(doc(db, 'teachers', teacherId), {
+                      usageBaselineBytes: total,
+                      usageResetAt: new Date(startMs).toISOString(),
+                      updatedAt: new Date().toISOString(),
+                    });
+                  } catch {}
+                }
+              } catch {}
               const sinceReset = Math.max(0, total - (isNaN(base) ? 0 : base));
+              const prevLocal = (() => { try { const raw = localStorage.getItem('lastStorageUsedBytes'); return raw ? Number(raw) : 0; } catch { return 0; } })();
+              const nextUsed = Math.max(prevLocal, sinceReset);
               if (!cancelled) {
-                setStorageUsedBytes(sinceReset);
-                try { localStorage.setItem('lastStorageUsedBytes', String(sinceReset)); } catch {}
+                setStorageUsedBytes(nextUsed);
+                try { localStorage.setItem('lastStorageUsedBytes', String(nextUsed)); } catch {}
               }
             } catch {
               if (!cancelled) {
@@ -337,12 +392,18 @@ export const DashboardHeader = ({
             try { localStorage.setItem('usageBaselineBytes', String(baseline)); } catch {}
             try {
               const prevReset = localStorage.getItem('usageResetAt') || '';
+              const prevExtraRaw = localStorage.getItem('lastExtraStorageGB') || '';
+              const prevExtra = prevExtraRaw ? Number(prevExtraRaw) : 0;
               if (resetAt && resetAt !== prevReset) {
                 localStorage.setItem('usageResetAt', resetAt);
-                localStorage.setItem('teacherUploadOffsetBytes', '0');
-                localStorage.setItem('teacherS3UsageBytes', '0');
-                localStorage.setItem('lastStorageUsedBytes', '0');
+                // لا نقوم بتصفير الاستخدام إلا إذا تمت زيادة ال add-on فعليًا
+                if (extra > prevExtra) {
+                  localStorage.setItem('teacherUploadOffsetBytes', '0');
+                  localStorage.setItem('teacherS3UsageBytes', '0');
+                  localStorage.setItem('lastStorageUsedBytes', '0');
+                }
               }
+              localStorage.setItem('lastExtraStorageGB', String(extra));
             } catch {}
           }
         });
@@ -387,8 +448,10 @@ export const DashboardHeader = ({
           const base = baseRaw ? Number(baseRaw) : 0;
           const total = used + extra;
           const sinceReset = Math.max(0, total - (isNaN(base) ? 0 : base));
-          setStorageUsedBytes(sinceReset);
-          try { localStorage.setItem('lastStorageUsedBytes', String(sinceReset)); } catch {}
+          const prevLocal = (() => { try { const raw = localStorage.getItem('lastStorageUsedBytes'); return raw ? Number(raw) : 0; } catch { return 0; } })();
+          const nextUsed = Math.max(prevLocal, sinceReset);
+          setStorageUsedBytes(nextUsed);
+          try { localStorage.setItem('lastStorageUsedBytes', String(nextUsed)); } catch {}
         } catch {}
       };
       setTimeout(run, 0);
@@ -411,6 +474,15 @@ export const DashboardHeader = ({
       const pct = capGB > 0 ? Math.min(100, Math.max(0, (usedGB / capGB) * 100)) : 0;
       const warnOnly = pct >= 80 && pct < 100;
       localStorage.setItem('storageWarningOnly', warnOnly ? 'true' : 'false');
+      // Update teacher doc with critical cap flag (95%+)
+      (async () => {
+        try {
+          if (!user?.uid) return;
+          const teacher = await TeacherService.getTeacherByUid(user.uid).catch(() => null);
+          const teacherId = (teacher as any)?.id || user.uid;
+          await updateDoc(doc(db, 'teachers', teacherId), { storageOver95Pct: pct >= 95, updatedAt: new Date().toISOString() });
+        } catch {}
+      })();
     } catch {}
   }, [storageUsedBytes, approvedStorageGB, extraStorageGB]);
 
@@ -578,6 +650,21 @@ export const DashboardHeader = ({
                   {language === 'ar' ? 'باقة ' : 'Plan '}
                   {approvedPlanName || (language === 'ar' ? 'نشطة' : 'Active')}
                 </span>
+                {(() => {
+                  const baseGB = (typeof approvedStorageGB === 'number' && approvedStorageGB > 0) ? approvedStorageGB : 0;
+                  const capGB = baseGB + (extraStorageGB > 0 ? extraStorageGB : 0);
+                  const usedGB = storageUsedBytes / (1024 * 1024 * 1024);
+                  const pct = capGB > 0 ? Math.min(100, Math.max(0, (usedGB / capGB) * 100)) : 0;
+                  if (pct >= 80) {
+                    return (
+                      <span className="inline-flex items-center gap-1 text-red-600">
+                        <AlertTriangle className="h-4 w-4" />
+                        <span className="text-xs">{language === 'ar' ? 'استخدام مرتفع' : 'High usage'}</span>
+                      </span>
+                    );
+                  }
+                  return null;
+                })()}
                 <button
                   type="button"
                   className="inline-flex items-center justify-center h-5 w-5 rounded-sm hover:bg-primary/10"
@@ -610,7 +697,7 @@ export const DashboardHeader = ({
                     const usedMB = storageUsedBytes / (1024 * 1024);
                     const pct = capGB > 0 ? Math.min(100, Math.max(0, (usedGB / capGB) * 100)) : 0;
                     const capText = (capGB % 1 === 0) ? `${capGB.toFixed(0)} GB` : `${capGB.toFixed(2)} GB`;
-                    const usedText = usedGB < 1 ? `${usedMB.toFixed(0)} MB` : `${usedGB.toFixed(2)} GB`;
+                    const usedText = usedGB < 1 ? `${usedMB.toFixed(2)} MB` : `${usedGB.toFixed(2)} GB`;
                     const label = `${usedText} / ${capText}`;
                     const suffix = language === 'ar' ? 'المساحة التخزينية للباقة' : 'Plan storage capacity';
                     const barColor = pct >= 80 ? 'bg-red-500' : (pct >= 50 ? 'bg-orange-500' : 'bg-green-500');

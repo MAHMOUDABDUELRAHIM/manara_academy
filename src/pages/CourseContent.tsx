@@ -26,7 +26,8 @@ import {
   ClipboardCheck,
   Calendar,
   CheckCircle2,
-  Award
+  Award,
+  AlertCircle
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { MessageCircle } from 'lucide-react';
@@ -68,6 +69,7 @@ const CourseContent = () => {
   const [brandNameScale, setBrandNameScale] = useState<number>(1);
   const playerRef = useRef<HTMLDivElement | null>(null);
   const videoElRef = useRef<HTMLIFrameElement | HTMLVideoElement | null>(null);
+  const [storageOverCap, setStorageOverCap] = useState<boolean>(false);
   // إعدادات Bunny مُعرَّفة بالفعل أعلى المكوّن
 
   const normalizedWhatsapp = (whatsappNumber || '').replace(/[^+\d]/g, '');
@@ -236,6 +238,8 @@ const CourseContent = () => {
                 const tShow = (teacherData as any)?.showWhatsappFloat as boolean | undefined;
                 if (typeof tWhats === 'string' && tWhats.trim()) setWhatsappNumber(tWhats);
                 if (typeof tShow === 'boolean') setShowWhatsappFloat(!!tShow);
+                const over95 = !!(teacherData as any)?.storageOver95Pct;
+                setStorageOverCap(over95);
               }
             } catch (e) {
               console.warn('Failed to load public teacher profile for course page', e);
@@ -465,6 +469,18 @@ const CourseContent = () => {
         {/* Video Player Section */}
         <div className="w-full">
           {(() => {
+            if (storageOverCap) {
+              return (
+                <div className="w-full h-48 flex items-center justify-center bg-muted rounded-lg">
+                  <div className="flex items-center gap-2 text-amber-700">
+                    <AlertCircle className="h-5 w-5" />
+                    <span className="text-sm font-medium">
+                      {language === 'ar' ? 'الفيديو غير متوفر في الوقت الحالي' : 'Video is not available at the moment'}
+                    </span>
+                  </div>
+                </div>
+              );
+            }
             const hasVideo = lesson.type === 'video';
             if (hasVideo) {
               const raw = lesson?.videoUrl || lesson?.content || lesson?.url || '';

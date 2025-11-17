@@ -14,6 +14,11 @@ import {
   setDoc
 } from 'firebase/firestore';
 import { db } from '@/firebase/config';
+import { CourseService } from '@/services/courseService';
+import { Course } from '@/types/course';
+import { StudentService } from '@/services/studentService';
+import type { StudentProfile } from '@/services/studentService';
+import { NotificationService } from '@/services/notificationService';
 
 // Helper: remove undefined deeply from objects/arrays (Firestore forbids undefined)
 function stripUndefinedDeep(obj: any): any {
@@ -66,6 +71,16 @@ export interface StudentTeacherLink {
 }
 
 export class TeacherService {
+  static async getAllTeachers(): Promise<TeacherProfile[]> {
+    try {
+      const q = query(collection(db, 'teachers'), orderBy('createdAt', 'desc'));
+      const snap = await getDocs(q);
+      return snap.docs.map(d => ({ id: d.id, ...(d.data() as any) } as TeacherProfile));
+    } catch (error) {
+      console.error('Error getting all teachers:', error);
+      throw error;
+    }
+  }
   // إنشاء ملف تعريف المدرس
   static async createTeacherProfile(
     uid: string, 
@@ -521,6 +536,135 @@ export class TeacherService {
       }));
     } catch (error) {
       console.error('Error updating teacher profile:', error);
+      throw error;
+    }
+  }
+
+  static async deleteTeacherProfile(teacherId: string): Promise<void> {
+    try {
+      const teacherRef = doc(db, 'teachers', teacherId);
+      const teacherSnap = await getDoc(teacherRef);
+      const data: any = teacherSnap.exists() ? teacherSnap.data() : null;
+
+      const linksQ = query(
+        collection(db, 'studentTeacherLinks'),
+        where('teacherId', '==', teacherId)
+      );
+      const linksSnap = await getDocs(linksQ);
+      for (const link of linksSnap.docs) {
+        const linkData: any = link.data();
+        const studentId: string | undefined = linkData?.studentId;
+        try {
+          if (studentId) {
+            await updateDoc(doc(db, 'students', studentId), {
+              teacherId: undefined,
+              linkedAt: undefined,
+              updatedAt: new Date().toISOString()
+            });
+          }
+        } catch {}
+        try {
+          await deleteDoc(doc(db, 'studentTeacherLinks', link.id));
+        } catch {}
+      }
+
+      try {
+        const codesQ = query(
+          collection(db, 'invitationCodes'),
+          where('teacherId', '==', teacherId)
+        );
+        const codesSnap = await getDocs(codesQ);
+        for (const c of codesSnap.docs) {
+          await deleteDoc(doc(db, 'invitationCodes', c.id));
+        }
+        const invitationCode: string | undefined = data?.invitationCode;
+        if (invitationCode) {
+          await deleteDoc(doc(db, 'invitationCodes', invitationCode));
+        }
+        try {
+          await deleteDoc(doc(db, 'teacherSettings', teacherId));
+        } catch {}
+      } catch {}
+
+      try {
+        const courses: Course[] = await CourseService.getInstructorCourses(teacherId);
+        const courseIds = courses.map((c) => c.id || '').filter(Boolean);
+
+        for (const courseId of courseIds) {
+          try {
+            try {
+              const students: StudentProfile[] = await StudentService.getStudentsByTeacher(teacherId);
+              const ops: Promise<unknown>[] = [];
+              for (const s of students) {
+                const enrolled = s.enrolledCourses || [];
+                if (Array.isArray(enrolled) && enrolled.includes(courseId)) {
+                  ops.push(StudentService.unenrollFromCourse(s.id, courseId));
+                  ops.push(deleteDoc(doc(db, 'studentProgress', `${s.id}_${courseId}`)));
+                }
+              }
+              if (ops.length > 0) {
+                await Promise.allSettled(ops);
+              }
+            } catch (e) {
+              console.warn('Failed to unenroll students and remove progress for course', courseId, e);
+            }
+
+            try {
+              const asgQ = query(collection(db, 'assignments'), where('courseId', '==', courseId));
+              const asgSnap = await getDocs(asgQ);
+              await Promise.allSettled(asgSnap.docs.map(d => deleteDoc(doc(db, 'assignments', d.id))));
+            } catch (e) {
+              console.warn('Failed to delete assignments for course', courseId, e);
+            }
+
+            try {
+              const attQ = query(collection(db, 'assignmentAttempts'), where('courseId', '==', courseId));
+              const attSnap = await getDocs(attQ);
+              await Promise.allSettled(attSnap.docs.map(d => deleteDoc(doc(db, 'assignmentAttempts', d.id))));
+            } catch (e) {
+              console.warn('Failed to delete assignment attempts for course', courseId, e);
+            }
+
+            try {
+              const exQ = query(collection(db, 'exams'), where('courseId', '==', courseId));
+              const exSnap = await getDocs(exQ);
+              await Promise.allSettled(exSnap.docs.map(d => deleteDoc(doc(db, 'exams', d.id))));
+            } catch (e) {
+              console.warn('Failed to delete exams for course', courseId, e);
+            }
+
+            try {
+              const notifQ = query(collection(db, 'notifications'), where('courseId', '==', courseId));
+              const notifSnap = await getDocs(notifQ);
+              await Promise.allSettled(notifSnap.docs.map(d => deleteDoc(doc(db, 'notifications', d.id))));
+            } catch (e) {
+              console.warn('Failed to delete notifications for course', courseId, e);
+            }
+
+            try {
+              const rateQ = query(collection(db, 'courseRatings'), where('courseId', '==', courseId));
+              const rateSnap = await getDocs(rateQ);
+              await Promise.allSettled(rateSnap.docs.map(d => deleteDoc(doc(db, 'courseRatings', d.id))));
+            } catch (e) {
+              console.warn('Failed to delete course ratings for course', courseId, e);
+            }
+
+            await CourseService.deleteCourse(courseId);
+          } catch {}
+        }
+
+        try {
+          const notifTeacherQ = query(collection(db, 'notifications'), where('teacherId', '==', teacherId));
+          const notifTeacherSnap = await getDocs(notifTeacherQ);
+          await Promise.allSettled(notifTeacherSnap.docs.map(d => deleteDoc(doc(db, 'notifications', d.id))));
+        } catch (e) {
+          console.warn('Failed to delete teacher-wide notifications', teacherId, e);
+        }
+      } catch {}
+
+      await deleteDoc(teacherRef);
+    } catch (error) {
+      console.error('Error deleting teacher profile:', error);
       throw error;
     }
   }

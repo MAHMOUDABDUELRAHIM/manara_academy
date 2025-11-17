@@ -18,11 +18,12 @@ export default function StorageAddon() {
   const navigate = useNavigate();
   const [gb, setGb] = useState<number>(1);
   const [priceEgp, setPriceEgp] = useState<number>(5);
-  const bundles = [
+  const [pricePerGBBase, setPricePerGBBase] = useState<number>(5);
+  const [bundles, setBundles] = useState<Array<{ id: string; gb: number; discountPct: number; color: string }>>([
     { id: 'bundle-2', gb: 2, discountPct: 40, color: '#ef4444' },
     { id: 'bundle-5', gb: 5, discountPct: 40, color: '#fb923c' },
     { id: 'bundle-10', gb: 10, discountPct: 40, color: '#22c55e' },
-  ];
+  ]);
   const [selectedBundleId, setSelectedBundleId] = useState<string>('custom');
   const [walletNumber, setWalletNumber] = useState<string>('');
   const [receiptBase64, setReceiptBase64] = useState<string>('');
@@ -43,11 +44,11 @@ export default function StorageAddon() {
 
   useEffect(() => {
     if (selectedBundleId === 'custom') {
-      setPriceEgp(gb * 5);
+      setPriceEgp(gb * pricePerGBBase);
     } else {
       const b = bundles.find(x => x.id === selectedBundleId);
       if (b) {
-        const base = b.gb * 5;
+        const base = b.gb * pricePerGBBase;
         const discounted = Math.round(base * (1 - b.discountPct / 100));
         setPriceEgp(discounted);
         setGb(b.gb);
@@ -60,6 +61,23 @@ export default function StorageAddon() {
       const data = snap.data() as any;
       const wallet = typeof data?.adminWalletNumber === 'string' ? data.adminWalletNumber : '';
       setWalletNumber(wallet);
+    });
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
+    const unsub = onSnapshot(doc(db, 'settings', 'storageAddon'), (snap) => {
+      const data = snap.data() as any;
+      const base = typeof data?.pricePerGBBase === 'number' ? data.pricePerGBBase : 5;
+      setPricePerGBBase(base);
+      const arr = Array.isArray(data?.bundles) ? data.bundles : [];
+      const mapped = arr.map((it: any) => ({
+        id: typeof it?.id === 'string' ? it.id : `bundle-${Math.random().toString(36).slice(2, 8)}`,
+        gb: typeof it?.gb === 'number' ? it.gb : 0,
+        discountPct: typeof it?.discountPct === 'number' ? it.discountPct : 0,
+        color: typeof it?.color === 'string' ? it.color : '#3b82f6',
+      })).filter((x: any) => x.gb > 0);
+      if (mapped.length > 0) setBundles(mapped);
     });
     return () => unsub();
   }, []);
@@ -144,7 +162,7 @@ export default function StorageAddon() {
         period: 'addon',
         bundleId: selectedBundleId === 'custom' ? null : selectedBundleId,
         discountPct: selectedBundleId === 'custom' ? 0 : (bundles.find(b => b.id === selectedBundleId)?.discountPct || 0),
-        pricePerGBBase: 5,
+        pricePerGBBase: pricePerGBBase,
       });
       const msg = language === 'ar'
         ? 'تم استلام طلب شراء المساحة الإضافية وجارٍ تفعيلها. قد يستغرق ذلك بضع دقائق. للتسريع يمكنك التواصل مع الدعم عبر واتساب.'

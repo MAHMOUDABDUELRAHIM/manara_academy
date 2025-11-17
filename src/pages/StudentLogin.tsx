@@ -17,6 +17,7 @@ import { MessageCircle } from "lucide-react";
 
 const StudentLogin = () => {
   const [isSuspended, setIsSuspended] = useState(false);
+  const [isUnavailable, setIsUnavailable] = useState(false);
   const { language, t } = useLanguage();
   const { login, loginWithGoogle, loginWithFacebook, loading, error } = useAuth();
   const navigate = useNavigate();
@@ -178,7 +179,13 @@ const StudentLogin = () => {
 
     } catch (error: any) {
       console.error('Login error:', error);
-      
+      if (error?.message === 'account_suspended') {
+        setIsSuspended(true);
+        toast.error(language === 'ar' ? 'تم تعليق حسابك. يرجى التواصل مع الدعم.' : 'Your account has been suspended. Please contact support.');
+      } else if (error?.message === 'account_not_available') {
+        setIsUnavailable(true);
+        toast.error(language === 'ar' ? 'هذا الحساب غير متوفر. يرجى التواصل مع الدعم.' : 'This account is not available. Please contact support.');
+      } else {
       if (error.code === 'auth/user-not-found') {
         toast.error(
           language === 'ar'
@@ -193,6 +200,7 @@ const StudentLogin = () => {
         toast.error(language === 'ar' ? 'تم تعطيل هذا الحساب' : 'This account has been disabled');
       } else {
         toast.error(language === 'ar' ? 'حدث خطأ في تسجيل الدخول' : 'Login error occurred');
+      }
       }
     } finally {
       setIsSubmitting(false);
@@ -259,7 +267,15 @@ const StudentLogin = () => {
 
     } catch (error: any) {
       console.error('Social login error:', error);
-      toast.error(language === 'ar' ? 'حدث خطأ في تسجيل الدخول' : 'Login error occurred');
+      if (error?.message === 'account_suspended') {
+        setIsSuspended(true);
+        toast.error(language === 'ar' ? 'تم تعليق حسابك. يرجى التواصل مع الدعم.' : 'Your account has been suspended. Please contact support.');
+      } else if (error?.message === 'account_not_available') {
+        setIsUnavailable(true);
+        toast.error(language === 'ar' ? 'هذا الحساب غير متوفر. يرجى التواصل مع الدعم.' : 'This account is not available. Please contact support.');
+      } else {
+        toast.error(language === 'ar' ? 'حدث خطأ في تسجيل الدخول' : 'Login error occurred');
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -329,6 +345,25 @@ const StudentLogin = () => {
                   {language === 'ar' 
                     ? 'لا يمكنك تسجيل الدخول حاليًا. يرجى التواصل مع الدعم الفني للمساعدة.' 
                     : 'You cannot log in at this time. Please contact support for assistance.'}
+                </p>
+              </div>
+            )}
+            {isUnavailable && (
+              <div className="p-4 border border-yellow-200 bg-yellow-50 rounded-lg">
+                <div className="flex items-center">
+                  <svg className="w-5 h-5 text-yellow-700 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                  </svg>
+                  <span className="font-medium">
+                    {language === 'ar' 
+                      ? 'هذا الحساب غير متوفر' 
+                      : 'This account is not available'}
+                  </span>
+                </div>
+                <p className="mt-2 text-sm">
+                  {language === 'ar' 
+                    ? 'يرجى التواصل مع الدعم الفني للمساعدة.' 
+                    : 'Please contact support for assistance.'}
                 </p>
               </div>
             )}

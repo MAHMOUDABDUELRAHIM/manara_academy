@@ -74,6 +74,13 @@ export const useAuth = () => {
                 permissions: ['all']
               });
             }
+            if (admin && (admin as any).isActive === false) {
+              setError('تم تعليق هذا الحساب. تواصل مع الدعم الفني لحل المشكلة');
+              await signOut(auth);
+              setUser(null);
+              setLoading(false);
+              return;
+            }
             userProfile = {
               fullName: admin.fullName,
               role: 'admin'
@@ -83,6 +90,13 @@ export const useAuth = () => {
             // Check if user is a teacher
             const teacher = await TeacherService.getTeacherByUid(firebaseUser.uid);
             if (teacher) {
+              if ((teacher as any).isActive === false) {
+                setError('تم تعليق هذا الحساب. تواصل مع الدعم الفني لحل المشكلة');
+                await signOut(auth);
+                setUser(null);
+                setLoading(false);
+                return;
+              }
               userProfile = {
                 fullName: teacher.fullName,
                 role: 'teacher',
@@ -100,21 +114,26 @@ export const useAuth = () => {
               };
               role = 'teacher';
             } else {
-              // Check if user is a student
               const student = await StudentService.getStudentByUid(firebaseUser.uid);
               if (student) {
+                if ((student as any).isActive === false) {
+                  setError('تم تعليق هذا الحساب. تواصل مع الدعم الفني لحل المشكلة');
+                  await signOut(auth);
+                  setUser(null);
+                  setLoading(false);
+                  return;
+                }
                 userProfile = {
                   fullName: student.fullName,
                   role: 'student'
                 };
                 role = 'student';
               } else {
-                // Default to student if no profile found
-                userProfile = {
-                  fullName: firebaseUser.displayName || '',
-                  role: 'student'
-                };
-                role = 'student';
+                setError('account_not_available');
+                await signOut(auth);
+                setUser(null);
+                setLoading(false);
+                return;
               }
             }
           }
@@ -205,6 +224,10 @@ export const useAuth = () => {
         
         // Update last login
         await AdminService.updateLastLogin(result.user.uid);
+        if (admin && (admin as any).isActive === false) {
+          await signOut(auth);
+          throw new Error('account_suspended');
+        }
         
         userProfile = {
           fullName: admin.fullName,
@@ -215,6 +238,10 @@ export const useAuth = () => {
         // Check if user is a teacher
         const teacher = await TeacherService.getTeacherByUid(result.user.uid);
         if (teacher) {
+          if ((teacher as any).isActive === false) {
+            await signOut(auth);
+            throw new Error('account_suspended');
+          }
           userProfile = {
             fullName: teacher.fullName,
             role: 'teacher',
@@ -228,6 +255,10 @@ export const useAuth = () => {
           // Check if user is a student
           const student = await StudentService.getStudentByUid(result.user.uid);
           if (student) {
+            if ((student as any).isActive === false) {
+              await signOut(auth);
+              throw new Error('account_suspended');
+            }
             userProfile = {
               fullName: student.fullName,
               role: 'student'
@@ -369,6 +400,10 @@ export const useAuth = () => {
       // Check if user is a teacher
       const teacher = await TeacherService.getTeacherByUid(result.user.uid);
       if (teacher) {
+        if ((teacher as any).isActive === false) {
+          await signOut(auth);
+          throw new Error('account_suspended');
+        }
         userProfile = {
           fullName: teacher.fullName,
           role: 'teacher',
@@ -377,33 +412,23 @@ export const useAuth = () => {
           createdAt: (teacher as any).createdAt || undefined,
         };
         role = 'teacher';
-      } else {
-        // Check if user is a student
-        const student = await StudentService.getStudentByUid(result.user.uid);
-        if (student) {
-          userProfile = {
-            fullName: student.fullName,
-            role: 'student'
-          };
-          role = 'student';
         } else {
-          // Create student profile by default
-          await StudentService.createStudentProfile({
-            uid: result.user.uid,
-            fullName: result.user.displayName || '',
-            email: result.user.email || '',
-            isActive: true,
-            enrolledCourses: [],
-            linkedTeachers: []
-          });
-          
-          userProfile = {
-            fullName: result.user.displayName || '',
-            role: 'student'
-          };
-          role = 'student';
+          const student = await StudentService.getStudentByUid(result.user.uid);
+          if (student) {
+            if ((student as any).isActive === false) {
+              await signOut(auth);
+              throw new Error('account_suspended');
+            }
+            userProfile = {
+              fullName: student.fullName,
+              role: 'student'
+            };
+            role = 'student';
+          } else {
+            await signOut(auth);
+            throw new Error('account_not_available');
+          }
         }
-      }
       
       return {
         ...result.user,
@@ -432,6 +457,10 @@ export const useAuth = () => {
       // Check if user is a teacher
       const teacher = await TeacherService.getTeacherByUid(result.user.uid);
       if (teacher) {
+        if ((teacher as any).isActive === false) {
+          await signOut(auth);
+          throw new Error('account_suspended');
+        }
         userProfile = {
           fullName: teacher.fullName,
           role: 'teacher',
@@ -440,33 +469,23 @@ export const useAuth = () => {
           createdAt: (teacher as any).createdAt || undefined,
         };
         role = 'teacher';
-      } else {
-        // Check if user is a student
-        const student = await StudentService.getStudentByUid(result.user.uid);
-        if (student) {
-          userProfile = {
-            fullName: student.fullName,
-            role: 'student'
-          };
-          role = 'student';
         } else {
-          // Create student profile by default
-          await StudentService.createStudentProfile({
-            uid: result.user.uid,
-            fullName: result.user.displayName || '',
-            email: result.user.email || '',
-            isActive: true,
-            enrolledCourses: [],
-            linkedTeachers: []
-          });
-          
-          userProfile = {
-            fullName: result.user.displayName || '',
-            role: 'student'
-          };
-          role = 'student';
+          const student = await StudentService.getStudentByUid(result.user.uid);
+          if (student) {
+            if ((student as any).isActive === false) {
+              await signOut(auth);
+              throw new Error('account_suspended');
+            }
+            userProfile = {
+              fullName: student.fullName,
+              role: 'student'
+            };
+            role = 'student';
+          } else {
+            await signOut(auth);
+            throw new Error('account_not_available');
+          }
         }
-      }
       
       return {
         ...result.user,

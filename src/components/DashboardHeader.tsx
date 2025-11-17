@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { db } from '@/firebase/config';
-import { doc, getDoc, getDocs, collection, onSnapshot, query, where } from 'firebase/firestore';
+import { doc, getDoc, getDocs, collection, onSnapshot, query, where, updateDoc } from 'firebase/firestore';
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { 
@@ -24,18 +24,28 @@ interface DashboardHeaderProps {
   studentName?: string;
   profileImage?: string;
   notificationCount?: number;
+  notifications?: { id: string; title: string; message: string; time: string; type: string }[];
+  onNotificationsOpen?: () => void;
+  newNotificationPreview?: { title: string; message: string; type?: string } | null;
+  onPreviewClear?: () => void;
 }
 
 export const DashboardHeader = ({ 
   studentName = "أحمد محمد", 
   profileImage,
-  notificationCount = 3 
+  notificationCount = 0,
+  notifications = [],
+  onNotificationsOpen,
+  newNotificationPreview,
+  onPreviewClear
 }: DashboardHeaderProps) => {
   const { language, t } = useLanguage();
   const { user, logout } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
   const [showNotifications, setShowNotifications] = useState(false);
+  const bellRef = useRef<HTMLButtonElement | null>(null);
+  const [previewPos, setPreviewPos] = useState<{ top: number; left: number } | null>(null);
   const [planOpen, setPlanOpen] = useState(false);
   // Ticking clock for live countdowns
   const [nowTick, setNowTick] = useState<number>(Date.now());
@@ -43,6 +53,67 @@ export const DashboardHeader = ({
     const id = window.setInterval(() => setNowTick(Date.now()), 1000);
     return () => { try { window.clearInterval(id); } catch {} };
   }, []);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const lastPreviewKeyRef = useRef<string | null>(null);
+  const ensureAudioCtx = async () => {
+    if (!audioCtxRef.current) {
+      const W = window as unknown as { webkitAudioContext?: typeof AudioContext };
+      const Ctor = window.AudioContext || W.webkitAudioContext;
+      audioCtxRef.current = new Ctor();
+    }
+    if (audioCtxRef.current.state === 'suspended') {
+      await audioCtxRef.current.resume();
+    }
+    return audioCtxRef.current;
+  };
+  const playNotificationChime = async () => {
+    const ctx = await ensureAudioCtx();
+    const now = ctx.currentTime;
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(0.25, now + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.8);
+    gain.connect(ctx.destination);
+    const o1 = ctx.createOscillator();
+    o1.type = 'sine';
+    o1.frequency.setValueAtTime(880, now);
+    o1.connect(gain);
+    o1.start(now);
+    o1.stop(now + 0.35);
+    const o2 = ctx.createOscillator();
+    o2.type = 'sine';
+    o2.frequency.setValueAtTime(1320, now + 0.18);
+    o2.connect(gain);
+    o2.start(now + 0.18);
+    o2.stop(now + 0.6);
+  };
+  useEffect(() => {
+    const key = newNotificationPreview ? `${newNotificationPreview.title}\n${newNotificationPreview.message}\n${newNotificationPreview.type || ''}` : '';
+    const shouldPlay = !!newNotificationPreview && !showNotifications && key && key !== lastPreviewKeyRef.current;
+    if (shouldPlay) {
+      lastPreviewKeyRef.current = key;
+      playNotificationChime();
+    }
+  }, [newNotificationPreview, showNotifications]);
+  const formatNotifTime = (iso?: string) => {
+    try {
+      const d = iso ? new Date(iso) : new Date();
+      const now = new Date();
+      const same = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+      const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+      const isTomorrow = d.getFullYear() === tomorrow.getFullYear() && d.getMonth() === tomorrow.getMonth() && d.getDate() === tomorrow.getDate();
+      const timeStr = d.toLocaleTimeString(language === 'ar' ? 'ar-EG' : 'en-US', { hour: 'numeric', minute: '2-digit' });
+      if (same) {
+        return language === 'ar' ? `اليوم ${timeStr}` : `today ${timeStr}`;
+      }
+      if (isTomorrow) {
+        return language === 'ar' ? `غداً ${timeStr}` : `tomorrow ${timeStr}`;
+      }
+      return d.toLocaleDateString(language === 'ar' ? 'ar-EG' : 'en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+    } catch {
+      return iso || '';
+    }
+  };
   // Subscription approval + storage usage state (teacher)
   const [approvedPlanName, setApprovedPlanName] = useState<string | null>(null);
   const [approvedStorageGB, setApprovedStorageGB] = useState<number | null>(() => {
@@ -474,13 +545,13 @@ export const DashboardHeader = ({
       const pct = capGB > 0 ? Math.min(100, Math.max(0, (usedGB / capGB) * 100)) : 0;
       const warnOnly = pct >= 80 && pct < 100;
       localStorage.setItem('storageWarningOnly', warnOnly ? 'true' : 'false');
-      // Update teacher doc with critical cap flag (95%+)
+      // Update teacher doc with storage cap flags
       (async () => {
         try {
           if (!user?.uid) return;
           const teacher = await TeacherService.getTeacherByUid(user.uid).catch(() => null);
           const teacherId = (teacher as any)?.id || user.uid;
-          await updateDoc(doc(db, 'teachers', teacherId), { storageOver95Pct: pct >= 95, updatedAt: new Date().toISOString() });
+          await updateDoc(doc(db, 'teachers', teacherId), { storageOver80Pct: pct >= 80, storageOver95Pct: pct >= 95, updatedAt: new Date().toISOString() });
         } catch {}
       })();
     } catch {}
@@ -604,10 +675,13 @@ export const DashboardHeader = ({
           </DropdownMenu>
           </div>
           {/* Notifications */}
-          <div className="order-2">
-          <DropdownMenu open={showNotifications} onOpenChange={setShowNotifications}>
+          <div className="order-2 relative">
+          <DropdownMenu open={showNotifications} onOpenChange={(v) => {
+            setShowNotifications(v);
+            try { if (v) { if (onNotificationsOpen) onNotificationsOpen(); if (onPreviewClear) onPreviewClear(); } } catch {}
+          }}>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="sm" className="relative">
+              <Button ref={bellRef} variant="ghost" size="sm" className="relative">
                 <Bell className="h-5 w-5" />
                 {notificationCount > 0 && (
                   <Badge 
@@ -619,20 +693,83 @@ export const DashboardHeader = ({
                 )}
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-80">
+            {!showNotifications && newNotificationPreview && previewPos && (
+              <div
+                className={`fixed z-50 w-[220px] max-w-[90vw] rounded-xl border border-border bg-card shadow-xl p-2 animate-in fade-in slide-in-from-top-2 ${language === 'ar' ? 'text-right' : 'text-left'} relative`}
+                style={{ top: previewPos.top, left: previewPos.left, transform: 'translateX(-50%)' }}
+                dir={language === 'ar' ? 'rtl' : 'ltr'}
+              >
+                <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-3 h-3 bg-card border border-border rotate-45" />
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] uppercase tracking-wide text-muted-foreground">{newNotificationPreview.type || 'info'}</span>
+                </div>
+                <div className="mt-1 text-xs font-medium truncate">{newNotificationPreview.title}</div>
+                <div className="text-[11px] text-muted-foreground mt-1 max-h-12 overflow-hidden">{newNotificationPreview.message}</div>
+                <div className="mt-2 flex justify-center">
+                  <button
+                    type="button"
+                    className="text-[11px] text-primary hover:underline"
+                    onClick={() => {
+                      try {
+                        setShowNotifications(true);
+                        if (onNotificationsOpen) onNotificationsOpen();
+                        if (onPreviewClear) onPreviewClear();
+                      } catch {}
+                    }}
+                  >
+                    {language === 'ar' ? 'قراءة الكل' : 'Read all'}
+                  </button>
+                </div>
+              </div>
+            )}
+            <DropdownMenuContent align="end" className="w-80" onPointerDownCapture={() => { try { onNotificationsOpen && onNotificationsOpen(); } catch {} }}>
               <div className="p-3 border-b">
                 <h4 className="font-medium">{t('notifications')}</h4>
               </div>
               <div className="max-h-64 overflow-y-auto">
-                <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
-                  <Bell className="h-8 w-8 mb-2 opacity-50" />
-                  <p className="text-sm text-center">
-                    {language === 'ar' ? 'لا توجد إشعارات' : 'No notifications'}
-                  </p>
-                  <p className="text-xs mt-1 text-center">
-                    {language === 'ar' ? 'ستظهر الإشعارات هنا' : 'Notifications will appear here'}
-                  </p>
-                </div>
+                {notifications.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
+                    <Bell className="h-8 w-8 mb-2 opacity-50" />
+                    <p className="text-sm text-center">
+                      {language === 'ar' ? 'لا توجد إشعارات' : 'No notifications'}
+                    </p>
+                    <p className="text-xs mt-1 text-center">
+                      {language === 'ar' ? 'ستظهر الإشعارات هنا' : 'Notifications will appear here'}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="divide-y">
+                    {notifications.map((n) => (
+                      <div key={n.id} className="p-3" dir={language === 'ar' ? 'rtl' : 'ltr'}>
+                        <div className={`flex items-start justify-between ${language === 'ar' ? 'flex-row-reverse' : ''}`}>
+                          <div className={`flex-1 ${language === 'ar' ? 'text-right' : ''}`}>
+                            <div className="text-sm font-medium">{n.title}</div>
+                            <div className="text-xs text-muted-foreground mt-1">{n.message}</div>
+                            <div className="text-[11px] text-muted-foreground mt-2">{formatNotifTime(n.time)}</div>
+                          </div>
+                          <div className={`flex items-center gap-2`}>
+                            {n.type && (
+                              <Badge variant={n.type === 'success' ? 'default' : n.type === 'warning' ? 'destructive' : 'secondary'}>{n.type}</Badge>
+                            )}
+                            {(n as any).linkUrl && (
+                              <button
+                                className="text-xs px-2 py-1 rounded bg-blue-600 text-white hover:bg-blue-700"
+                                onClick={() => {
+                                  try {
+                                    const url = (n as any).linkUrl as string;
+                                    if (url) window.open(url, '_blank');
+                                  } catch {}
+                                }}
+                              >
+                                {((n as any).linkText as string) || (language === 'ar' ? 'فتح' : 'Open')}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
               <DropdownMenuSeparator />
               <DropdownMenuItem className="p-3 text-center cursor-pointer">

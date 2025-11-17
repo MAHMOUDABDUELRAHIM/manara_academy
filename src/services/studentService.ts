@@ -301,8 +301,57 @@ export class StudentService {
   // حذف ملف تعريف الطالب
   static async deleteStudentProfile(studentId: string): Promise<void> {
     try {
-      const docRef = doc(db, 'students', studentId);
-      await deleteDoc(docRef);
+      const linksQ = query(
+        collection(db, 'studentTeacherLinks'),
+        where('studentId', '==', studentId)
+      );
+      const linksSnap = await getDocs(linksQ);
+      for (const link of linksSnap.docs) {
+        try {
+          await deleteDoc(doc(db, 'studentTeacherLinks', link.id));
+        } catch {}
+      }
+
+      try {
+        const attQ = query(collection(db, 'assignmentAttempts'), where('studentId', '==', studentId));
+        const attSnap = await getDocs(attQ);
+        await Promise.allSettled(attSnap.docs.map(d => deleteDoc(doc(db, 'assignmentAttempts', d.id))));
+      } catch (e) {
+        console.warn('Failed to delete assignment attempts for student', studentId, e);
+      }
+
+      try {
+        const progQ = query(collection(db, 'studentProgress'), where('studentId', '==', studentId));
+        const progSnap = await getDocs(progQ);
+        await Promise.allSettled(progSnap.docs.map(d => deleteDoc(doc(db, 'studentProgress', d.id))));
+      } catch (e) {
+        console.warn('Failed to delete student progress docs for student', studentId, e);
+      }
+
+      try {
+        const notifQ = query(collection(db, 'notifications'), where('userId', '==', studentId));
+        const notifSnap = await getDocs(notifQ);
+        await Promise.allSettled(notifSnap.docs.map(d => deleteDoc(doc(db, 'notifications', d.id))));
+      } catch (e) {
+        console.warn('Failed to delete notifications for student', studentId, e);
+      }
+
+      try {
+        const srMainQ = query(collection(db, 'subscriptionRequests'), where('studentId', '==', studentId));
+        const srMainSnap = await getDocs(srMainQ);
+        await Promise.allSettled(srMainSnap.docs.map(d => deleteDoc(doc(db, 'subscriptionRequests', d.id))));
+      } catch (e) {
+        console.warn('Failed to delete subscription requests for student', studentId, e);
+      }
+
+      try {
+        const srSubSnap = await getDocs(collection(db, 'students', studentId, 'subscriptionRequests'));
+        await Promise.allSettled(srSubSnap.docs.map(d => deleteDoc(doc(db, 'students', studentId, 'subscriptionRequests', d.id))));
+      } catch (e) {
+        console.warn('Failed to delete student subcollection subscriptionRequests', studentId, e);
+      }
+
+      await deleteDoc(doc(db, 'students', studentId));
     } catch (error) {
       console.error('Error deleting student profile:', error);
       throw error;

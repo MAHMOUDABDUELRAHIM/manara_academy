@@ -165,8 +165,66 @@ const Settings: React.FC = () => {
     { id: 'general', label: language === 'ar' ? 'الإعدادات العامة' : 'General Settings', icon: Globe },
     { id: 'payment', label: language === 'ar' ? 'إعدادات الدفع' : 'Payment Settings', icon: CreditCard },
     { id: 'notifications', label: language === 'ar' ? 'إعدادات الإشعارات' : 'Notification Settings', icon: Bell },
-    { id: 'plans', label: language === 'ar' ? 'إدارة الخطط' : 'Plan Management', icon: Crown }
+    { id: 'plans', label: language === 'ar' ? 'إدارة الخطط' : 'Plan Management', icon: Crown },
+    { id: 'addons', label: language === 'ar' ? 'إدارة خطط الزيادة' : 'Add-on Management', icon: DollarSign }
   ];
+
+  const [addonSettings, setAddonSettings] = useState<{ pricePerGBBase: number; bundles: { id: string; gb: number; discountPct: number; color: string }[] }>({
+    pricePerGBBase: 5,
+    bundles: [
+      { id: 'bundle-2', gb: 2, discountPct: 40, color: '#ef4444' },
+      { id: 'bundle-5', gb: 5, discountPct: 40, color: '#fb923c' },
+      { id: 'bundle-10', gb: 10, discountPct: 40, color: '#22c55e' },
+    ],
+  });
+
+  useEffect(() => {
+    const unsub = onSnapshot(doc(db, 'settings', 'storageAddon'), (snap) => {
+      const d: any = snap.data() || {};
+      const base = typeof d?.pricePerGBBase === 'number' ? d.pricePerGBBase : addonSettings.pricePerGBBase;
+      const arr = Array.isArray(d?.bundles) ? d.bundles : addonSettings.bundles;
+      const mapped = arr.map((it: any) => ({
+        id: typeof it?.id === 'string' ? it.id : `bundle-${Math.random().toString(36).slice(2, 8)}`,
+        gb: typeof it?.gb === 'number' ? it.gb : 0,
+        discountPct: typeof it?.discountPct === 'number' ? it.discountPct : 0,
+        color: typeof it?.color === 'string' ? it.color : '#3b82f6',
+      })).filter((x: any) => x.gb > 0);
+      setAddonSettings({ pricePerGBBase: base, bundles: mapped });
+    });
+    return () => unsub();
+  }, []);
+
+  const handleSaveAddonSettings = async () => {
+    try {
+      await setDoc(doc(db, 'settings', 'storageAddon'), {
+        pricePerGBBase: Number(addonSettings.pricePerGBBase) || 5,
+        bundles: addonSettings.bundles.map(b => ({ id: b.id, gb: Number(b.gb) || 0, discountPct: Number(b.discountPct) || 0, color: b.color })),
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+      toast.success(language === 'ar' ? 'تم حفظ إعدادات الزيادة بالمساحة.' : 'Storage add-on settings saved.');
+    } catch {
+      toast.error(language === 'ar' ? 'تعذر حفظ الإعدادات.' : 'Failed to save settings.');
+    }
+  };
+
+  const addBundleRow = () => {
+    const id = `bundle-${Date.now()}`;
+    setAddonSettings((prev) => ({
+      ...prev,
+      bundles: [...prev.bundles, { id, gb: 1, discountPct: 0, color: '#3b82f6' }],
+    }));
+  };
+
+  const updateBundleField = (id: string, key: 'gb' | 'discountPct' | 'color', value: string) => {
+    setAddonSettings((prev) => ({
+      ...prev,
+      bundles: prev.bundles.map((b) => b.id === id ? { ...b, [key]: key === 'color' ? value : Number(value) } : b),
+    }));
+  };
+
+  const removeBundle = (id: string) => {
+    setAddonSettings((prev) => ({ ...prev, bundles: prev.bundles.filter((b) => b.id !== id) }));
+  };
 
   const handleSaveGeneral = () => {
     console.log('Saving general settings:', generalSettings);
@@ -357,7 +415,7 @@ const Settings: React.FC = () => {
             </p>
           </div>
 
-          {/* Settings Navigation */}
+        {/* Settings Navigation */}
           <div className="flex flex-wrap gap-2 mb-6 border-b">
             {tabs.map((tab) => {
               const Icon = tab.icon;
@@ -504,6 +562,68 @@ const Settings: React.FC = () => {
                   <Save className="h-4 w-4 mr-2" />
                   {language === 'ar' ? 'حفظ التغييرات' : 'Save Changes'}
                 </Button>
+              </CardContent>
+            </Card>
+          )}
+
+          {activeTab === 'addons' && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <DollarSign className="h-5 w-5" />
+                  {language === 'ar' ? 'إدارة خطط الزيادة في المساحة' : 'Storage Add-on Management'}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="space-y-2">
+                    <Label>{language === 'ar' ? 'سعر الأساس لكل جيجا (EGP)' : 'Base price per GB (EGP)'}</Label>
+                    <Input
+                      type="number"
+                      value={addonSettings.pricePerGBBase}
+                      onChange={(e) => setAddonSettings({ ...addonSettings, pricePerGBBase: Number(e.target.value) })}
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label>{language === 'ar' ? 'الباقات الجاهزة' : 'Ready-made bundles'}</Label>
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>{language === 'ar' ? 'المعرف' : 'ID'}</TableHead>
+                          <TableHead>{language === 'ar' ? 'السعة (GB)' : 'Capacity (GB)'}</TableHead>
+                          <TableHead>{language === 'ar' ? 'نسبة الخصم (%)' : 'Discount (%)'}</TableHead>
+                          <TableHead>{language === 'ar' ? 'اللون' : 'Color'}</TableHead>
+                          <TableHead>{language === 'ar' ? 'إجراء' : 'Action'}</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {addonSettings.bundles.map((b) => (
+                          <TableRow key={b.id}>
+                            <TableCell className="text-xs text-muted-foreground">{b.id}</TableCell>
+                            <TableCell>
+                              <Input type="number" value={b.gb} onChange={(e) => updateBundleField(b.id, 'gb', e.target.value)} />
+                            </TableCell>
+                            <TableCell>
+                              <Input type="number" value={b.discountPct} onChange={(e) => updateBundleField(b.id, 'discountPct', e.target.value)} />
+                            </TableCell>
+                            <TableCell>
+                              <Input type="text" value={b.color} onChange={(e) => updateBundleField(b.id, 'color', e.target.value)} />
+                            </TableCell>
+                            <TableCell>
+                              <Button variant="destructive" onClick={() => removeBundle(b.id)}>{language === 'ar' ? 'حذف' : 'Delete'}</Button>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button variant="outline" onClick={addBundleRow}><Plus className="h-4 w-4 mr-2" />{language === 'ar' ? 'إضافة باقة' : 'Add Bundle'}</Button>
+                    <Button onClick={handleSaveAddonSettings}><Save className="h-4 w-4 mr-2" />{language === 'ar' ? 'حفظ' : 'Save'}</Button>
+                  </div>
+                </div>
               </CardContent>
             </Card>
           )}

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Search, Sun, Moon, Bell } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { auth } from '@/firebase/config';
@@ -32,6 +32,11 @@ const getInitials = (name: string) => {
 
 export default function InviteHeader({ teacherName, teacherPhotoURL, brandLogo, brandName, brandLogoScale = 1, brandNameScale = 1, showProfileAvatar = true, unreadCount = 0, onNotificationsClick, notifications = [], showNotifications = false, onNotificationItemClick, teacherId }: InviteHeaderProps) {
   const { language, setLanguage } = useLanguage();
+  const bellRef = useRef<HTMLButtonElement | null>(null);
+  const [previewData, setPreviewData] = useState<{ title: string; message: string; type?: string } | null>(null);
+  const [previewPos, setPreviewPos] = useState<{ top: number; left: number } | null>(null);
+  const prevUnreadRef = useRef<number>(unreadCount);
+  const prevLenRef = useRef<number>((notifications || []).length);
   const [isDark, setIsDark] = useState<boolean>(() => {
     if (typeof document !== 'undefined') {
       const saved = localStorage.getItem('theme');
@@ -66,6 +71,69 @@ export default function InviteHeader({ teacherName, teacherPhotoURL, brandLogo, 
   const studentName = auth.currentUser?.displayName
     || (auth.currentUser?.email ? String(auth.currentUser.email).split('@')[0] : (language === 'ar' ? 'الطالب' : 'Student'));
   const studentAvatar = auth.currentUser?.photoURL || '';
+
+  const formatNotifTime = (iso?: string) => {
+    try {
+      const d = iso ? new Date(iso) : new Date();
+      const now = new Date();
+      const same = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+      const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+      const isTomorrow = d.getFullYear() === tomorrow.getFullYear() && d.getMonth() === tomorrow.getMonth() && d.getDate() === tomorrow.getDate();
+      const timeStr = d.toLocaleTimeString(language === 'ar' ? 'ar-EG' : 'en-US', { hour: 'numeric', minute: '2-digit' });
+      if (same) return language === 'ar' ? `اليوم ${timeStr}` : `today ${timeStr}`;
+      if (isTomorrow) return language === 'ar' ? `غداً ${timeStr}` : `tomorrow ${timeStr}`;
+      return d.toLocaleDateString(language === 'ar' ? 'ar-EG' : 'en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+    } catch {
+      return iso || '';
+    }
+  };
+
+  useEffect(() => {
+    const compute = () => {
+      try {
+        if (!previewData || showNotifications) { setPreviewPos(null); return; }
+        const el = bellRef.current;
+        if (!el) { setPreviewPos(null); return; }
+        const rect = el.getBoundingClientRect();
+        const top = rect.bottom + 8;
+        const left = rect.left + (rect.width / 2);
+        setPreviewPos({ top, left });
+      } catch { setPreviewPos(null); }
+    };
+    compute();
+    const onScroll = () => compute();
+    const onResize = () => compute();
+    window.addEventListener('scroll', onScroll, { passive: true } as any);
+    window.addEventListener('resize', onResize);
+    return () => {
+      window.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', onResize);
+    };
+  }, [previewData, showNotifications]);
+
+  useEffect(() => {
+    try {
+      if (showNotifications) { setPreviewData(null); }
+      const currUnread = unreadCount || 0;
+      const currLen = (notifications || []).length;
+      const prevUnread = prevUnreadRef.current || 0;
+      const prevLen = prevLenRef.current || 0;
+      let shouldShow = false;
+      let n: any = null;
+      if (currUnread > prevUnread) {
+        shouldShow = true;
+        n = (notifications || [])[0];
+      } else if (currLen > prevLen) {
+        shouldShow = true;
+        n = (notifications || [])[0];
+      }
+      prevUnreadRef.current = currUnread;
+      prevLenRef.current = currLen;
+      if (!showNotifications && shouldShow && n) {
+        setPreviewData({ title: String(n.title || ''), message: String(n.message || ''), type: String(n.type || 'info') });
+      }
+    } catch {}
+  }, [unreadCount, notifications, showNotifications]);
 
   return (
     <header className="sticky top-0 z-50 bg-white/80 dark:bg-gray-900/80 backdrop-blur-sm shadow-sm">
@@ -129,19 +197,47 @@ export default function InviteHeader({ teacherName, teacherPhotoURL, brandLogo, 
           </div>
           <div className="relative">
             <button
-              onClick={onNotificationsClick}
-              aria-label={language === 'ar' ? 'الإشعارات' : 'Notifications'}
-              className="relative inline-flex items-center justify-center w-10 h-10 rounded-lg border border-gray-300 bg-white hover:bg-gray-50 dark:bg-gray-800 dark:border-gray-700"
-            >
-              <Bell className="w-5 h-5 text-gray-700 dark:text-gray-200" />
-              {unreadCount > 0 && (
-                <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full px-1.5 py-0.5">
-                  {Math.min(unreadCount, 99)}
-                </span>
-              )}
-            </button>
+          ref={bellRef}
+          onClick={() => {
+            try { onNotificationsClick && onNotificationsClick(); } catch {}
+          }}
+          aria-label={language === 'ar' ? 'الإشعارات' : 'Notifications'}
+          className="relative inline-flex items-center justify-center w-10 h-10 rounded-lg border border-gray-300 bg-white hover:bg-gray-50 dark:bg-gray-800 dark:border-gray-700"
+        >
+          <Bell className="w-5 h-5 text-gray-700 dark:text-gray-200" />
+          {unreadCount > 0 && (
+            <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full px-1.5 py-0.5">
+              {Math.min(unreadCount, 99)}
+            </span>
+          )}
+        </button>
+            {!showNotifications && previewData && previewPos && (
+              <div
+                className={`fixed z-50 w-[200px] max-w-[90vw] rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-xl p-2 ${language === 'ar' ? 'text-right' : 'text-left'} relative`}
+                style={{ top: previewPos.top, left: previewPos.left, transform: 'translateX(-50%)' }}
+                dir={language === 'ar' ? 'rtl' : 'ltr'}
+              >
+                <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-3 h-3 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rotate-45" />
+                <div className="text-xs font-medium truncate">{previewData.title}</div>
+                <div className="text-[11px] text-gray-500 dark:text-gray-400 mt-1 max-h-10 overflow-hidden">{previewData.message}</div>
+                <div className="mt-2 flex justify-center">
+                  <button
+                    type="button"
+                    className="text-[11px] text-blue-600 dark:text-blue-400 hover:underline"
+                    onClick={() => {
+                      try {
+                        onNotificationsClick && onNotificationsClick();
+                      } catch {}
+                      setPreviewData(null);
+                    }}
+                  >
+                    {language === 'ar' ? 'قراءة الكل' : 'Read all'}
+                  </button>
+                </div>
+              </div>
+            )}
             {showNotifications && (
-              <div className={`absolute top-full mt-2 ${language === 'ar' ? 'left-0' : 'right-0'} w-80 max-h-[60vh] overflow-auto rounded-xl border shadow-lg bg-white dark:bg-gray-900 z-50`}>
+              <div className={`absolute top-full mt-2 ${language === 'ar' ? 'left-0' : 'right-0'} w-80 max-h-[60vh] overflow-auto rounded-xl border shadow-lg bg-white dark:bg-gray-900 z-50`} dir={language === 'ar' ? 'rtl' : 'ltr'}>
                 <div className="p-3 border-b">
                   <div className="flex items-center justify-between">
                     <span className="text-sm font-semibold">
@@ -163,20 +259,31 @@ export default function InviteHeader({ teacherName, teacherPhotoURL, brandLogo, 
                   ) : (
                     (notifications || []).map((n: any) => (
                       <div key={n.id || `${n.title}-${n.time}`} className="p-2 rounded-lg border bg-white dark:bg-gray-800">
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="flex-1">
+                        <div className={`flex items-start justify-between gap-2 ${language === 'ar' ? 'flex-row-reverse' : ''}`}>
+                          <div className={`flex-1 ${language === 'ar' ? 'text-right' : ''}`}>
                             <div className="text-sm font-semibold">{n.title}</div>
                             <div className="text-xs text-muted-foreground">{n.message}</div>
-                            {n.createdAt && (
-                              <div className="text-[10px] text-gray-400 mt-1">{String(n.createdAt)}</div>
+                            <div className="text-[10px] text-gray-400 mt-1">{formatNotifTime(n.time || n.createdAt)}</div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {n.type && (
+                              <span className="text-[10px] uppercase tracking-wide text-gray-500">{String(n.type)}</span>
+                            )}
+                            {(n.linkUrl || n.linkText) && (
+                              <button
+                                className={`text-xs px-2 py-1 rounded bg-blue-600 text-white hover:bg-blue-700`}
+                                onClick={() => {
+                                  try {
+                                    if (onNotificationItemClick) onNotificationItemClick(n);
+                                    const url = n.linkUrl || n.url;
+                                    if (url) window.open(String(url), '_blank');
+                                  } catch {}
+                                }}
+                              >
+                                {n.linkText || (language === 'ar' ? 'فتح' : 'Open')}
+                              </button>
                             )}
                           </div>
-                          <button
-                            className="text-xs px-2 py-1 rounded bg-blue-600 text-white hover:bg-blue-700"
-                            onClick={() => onNotificationItemClick && onNotificationItemClick(n)}
-                          >
-                            {language === 'ar' ? 'فتح' : 'Open'}
-                          </button>
                         </div>
                       </div>
                     ))

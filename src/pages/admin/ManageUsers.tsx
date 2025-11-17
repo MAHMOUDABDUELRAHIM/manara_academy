@@ -60,6 +60,7 @@ import {
   AlertTriangle
 } from 'lucide-react';
 import { useUsers, FirestoreUser } from '@/hooks/useUsers';
+import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/components/ui/use-toast';
 
 // دالة لحساب الأيام المتبقية للاشتراك
@@ -94,18 +95,31 @@ const ManageUsers: React.FC = () => {
     getUserStats
   } = useUsers();
   const { toast } = useToast();
+  const { resetPassword } = useAuth();
   const [searchTerm, setSearchTerm] = useState('');
   const [roleFilter, setRoleFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [selectedUser, setSelectedUser] = useState<FirestoreUser | null>(null);
   const [isSuspendDialogOpen, setIsSuspendDialogOpen] = useState(false);
   const [userToSuspend, setUserToSuspend] = useState<{id: string, status: string, role: string} | null>(null);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [userToDelete, setUserToDelete] = useState<{id: string, role: string} | null>(null);
 
-  // Filter users based on search and filters
-  let filteredUsers = searchUsers(searchTerm);
-  filteredUsers = filterUsersByRole(roleFilter as any);
-  filteredUsers = filterUsersByStatus(statusFilter as any);
-  filteredUsers = filteredUsers.filter(user => user.email !== 'mahmoudabduelrahim@gmail.com');
+  let filteredUsers = users.filter(user => user.email !== 'mahmoudabduelrahim@gmail.com');
+  if (searchTerm.trim()) {
+    const term = searchTerm.toLowerCase();
+    filteredUsers = filteredUsers.filter(u => 
+      (u.fullName || '').toLowerCase().includes(term) ||
+      (u.email || '').toLowerCase().includes(term) ||
+      (u.role || '').toLowerCase().includes(term)
+    );
+  }
+  if (roleFilter !== 'all') {
+    filteredUsers = filteredUsers.filter(u => u.role === roleFilter);
+  }
+  if (statusFilter !== 'all') {
+    filteredUsers = filteredUsers.filter(u => u.status === statusFilter);
+  }
 
   // Get user statistics
   const stats = getUserStats();
@@ -186,18 +200,40 @@ const ManageUsers: React.FC = () => {
   };
 
   const handleDeleteUser = async (userId: string, role: string) => {
-    if (window.confirm(language === 'ar' ? 'هل أنت متأكد من حذف هذا المستخدم؟' : 'Are you sure you want to delete this user?')) {
-      await deleteUser(userId, role as any);
+    setUserToDelete({ id: userId, role });
+    setIsDeleteDialogOpen(true);
+  };
+
+  const confirmDeleteUser = async () => {
+    if (!userToDelete) return;
+    try {
+      await deleteUser(userToDelete.id, userToDelete.role as any);
+      toast({
+        title: language === 'ar' ? 'تم حذف المستخدم وكل البيانات المرتبطة' : 'User and related data deleted',
+        variant: 'default'
+      });
+    } catch (error) {
+      toast({
+        title: language === 'ar' ? 'فشل حذف المستخدم' : 'Failed to delete user',
+        variant: 'destructive'
+      });
+    } finally {
+      setIsDeleteDialogOpen(false);
+      setUserToDelete(null);
     }
   };
 
   const handleResetPassword = async (userId: string) => {
-    // This would typically send a password reset email
-    // For now, we'll just show a success message
-    if (language === 'ar') {
-      alert('تم إرسال رابط إعادة تعيين كلمة المرور إلى البريد الإلكتروني للمستخدم');
-    } else {
-      alert('Password reset link sent to user\'s email');
+    try {
+      const target = users.find(u => u.id === userId);
+      if (!target || !target.email) {
+        toast({ title: language === 'ar' ? 'البريد الإلكتروني غير متاح' : 'Email not available', variant: 'destructive' });
+        return;
+      }
+      await resetPassword(target.email);
+      toast({ title: language === 'ar' ? 'تم إرسال رابط إعادة تعيين كلمة المرور' : 'Password reset link sent', variant: 'default' });
+    } catch (e) {
+      toast({ title: language === 'ar' ? 'فشل إرسال رابط إعادة التعيين' : 'Failed to send reset link', variant: 'destructive' });
     }
   };
 
@@ -735,6 +771,51 @@ const ManageUsers: React.FC = () => {
               onClick={confirmSuspendUser}
             >
               {language === 'ar' ? 'تأكيد تعليق الحساب' : 'Confirm Suspension'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete User Confirmation Dialog */}
+      <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-center text-red-600">
+              {language === 'ar' ? 'تأكيد حذف المستخدم' : 'Confirm User Deletion'}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="flex justify-center">
+              <Trash2 className="h-16 w-16 text-red-500" />
+            </div>
+            <p className="text-center">
+              {language === 'ar' 
+                ? 'سيتم حذف هذا المستخدم وجميع المعلومات المرتبطة به من النظام، بما في ذلك روابط الدعوة والارتباطات.' 
+                : 'This will delete the user and all related information, including invitation links and associations.'
+              }
+            </p>
+            <p className="text-center text-sm text-gray-500">
+              {language === 'ar'
+                ? 'لا يمكن التراجع عن هذا الإجراء.'
+                : 'This action cannot be undone.'
+              }
+            </p>
+          </div>
+          <DialogFooter className="flex justify-between sm:justify-between">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setIsDeleteDialogOpen(false);
+                setUserToDelete(null);
+              }}
+            >
+              {language === 'ar' ? 'إلغاء' : 'Cancel'}
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={confirmDeleteUser}
+            >
+              {language === 'ar' ? 'تأكيد الحذف' : 'Confirm Deletion'}
             </Button>
           </DialogFooter>
         </DialogContent>

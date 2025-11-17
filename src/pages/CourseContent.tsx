@@ -5,7 +5,7 @@ import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuthContext } from '@/contexts/AuthContext';
 import InviteHeader from '@/components/InviteHeader';
 import { db } from '@/firebase/config';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, onSnapshot } from 'firebase/firestore';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
@@ -315,6 +315,20 @@ const CourseContent = () => {
     loadData();
     return () => { isMounted = false; };
   }, [courseId, user?.uid, language]);
+
+  useEffect(() => {
+    try {
+      const teacherId = (course as any)?.instructorId;
+      if (!teacherId) return;
+      const unsub = onSnapshot(doc(db, 'teachers', String(teacherId)), (snap) => {
+        const data = snap.data() as any;
+        const over80 = !!(data?.storageOver80Pct);
+        const over95 = !!(data?.storageOver95Pct);
+        setStorageOverCap(over80 || over95);
+      });
+      return () => { try { unsub(); } catch {} };
+    } catch {}
+  }, [course?.instructorId]);
 
   const getContentIcon = (type: string) => {
     switch (type) {

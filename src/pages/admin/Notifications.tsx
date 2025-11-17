@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -30,6 +30,10 @@ import {
 import { useLanguage } from '@/contexts/LanguageContext';
 import AdminHeader from '@/components/AdminHeader';
 import AdminSidebar from '@/components/AdminSidebar';
+import { Label } from '@/components/ui/label';
+import { NotificationService } from '@/services/notificationService';
+import { db } from '@/firebase/config';
+import { collection, getDocs, limit, query } from 'firebase/firestore';
 
 import {
   Bell,
@@ -48,22 +52,14 @@ import {
   Download
 } from 'lucide-react';
 
-interface Notification {
+interface AdminNotificationRow {
   id: string;
-  type: 'info' | 'warning' | 'success' | 'error';
+  type: string;
   title: string;
   message: string;
-  recipient: {
-    type: 'all' | 'students' | 'teachers' | 'specific';
-    users?: string[];
-  };
   sender: string;
   createdDate: string;
-  readBy: string[];
   totalRecipients: number;
-  status: 'sent' | 'draft' | 'scheduled';
-  scheduledDate?: string;
-  category: 'system' | 'course' | 'payment' | 'announcement' | 'maintenance';
 }
 
 const Notifications: React.FC = () => {
@@ -72,51 +68,57 @@ const Notifications: React.FC = () => {
   const [typeFilter, setTypeFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [selectedNotifications, setSelectedNotifications] = useState<string[]>([]);
-  const [selectedNotification, setSelectedNotification] = useState<Notification | null>(null);
+  const [selectedNotification, setSelectedNotification] = useState<AdminNotificationRow | null>(null);
+  const [notifications, setNotifications] = useState<AdminNotificationRow[]>([]);
+  const [teachers, setTeachers] = useState<{ id: string; name: string }[]>([]);
+  const [newTitle, setNewTitle] = useState('');
+  const [newMessage, setNewMessage] = useState('');
+  const [newType, setNewType] = useState<string>('info');
+  const [recipientScope, setRecipientScope] = useState<'all' | 'specific'>('all');
+  const [recipientTeacherId, setRecipientTeacherId] = useState<string>('');
+  const [isNewDialogOpen, setIsNewDialogOpen] = useState(false);
+  const [expiresAtLocal, setExpiresAtLocal] = useState<string>('');
+  const [linkText, setLinkText] = useState<string>('');
+  const [linkUrl, setLinkUrl] = useState<string>('');
+  const BROADCAST_TEACHERS = '__ALL_TEACHERS__';
 
-  // Mock notifications data
-  const [notifications, setNotifications] = useState<Notification[]>([
-    {
-      id: '1',
-      type: 'info',
-      title: 'تحديث جديد للمنصة',
-      message: 'تم إطلاق تحديث جديد للمنصة يتضمن تحسينات في الأداء وميزات جديدة. يرجى تسجيل الخروج وإعادة تسجيل الدخول لتطبيق التحديثات.',
-      recipient: { type: 'all' },
-      sender: 'فريق التطوير',
-      createdDate: '2024-01-15',
-      readBy: ['user1', 'user2', 'user3'],
-      totalRecipients: 1250,
-      status: 'sent',
-      category: 'system'
-    },
-    {
-      id: '2',
-      type: 'warning',
-      title: 'صيانة مجدولة للخادم',
-      message: 'ستتم صيانة الخادم يوم الجمعة من الساعة 2:00 إلى 4:00 صباحاً. قد تواجه انقطاع في الخدمة خلال هذه الفترة.',
-      recipient: { type: 'all' },
-      sender: 'فريق التقنية',
-      createdDate: '2024-01-14',
-      readBy: ['user1', 'user4'],
-      totalRecipients: 1250,
-      status: 'scheduled',
-      scheduledDate: '2024-01-19',
-      category: 'maintenance'
-    },
-    {
-      id: '3',
-      type: 'success',
-      title: 'دورة جديدة متاحة: React المتقدم',
-      message: 'تم إضافة دورة جديدة في React المتقدم من إعداد الأستاذ أحمد محمد. سجل الآن واحصل على خصم 20% للمسجلين الأوائل.',
-      recipient: { type: 'students' },
-      sender: 'فريق المحتوى',
-      createdDate: '2024-01-13',
-      readBy: ['user2', 'user5', 'user6'],
-      totalRecipients: 850,
-      status: 'sent',
-      category: 'course'
-    }
-  ]);
+  useEffect(() => {
+    const run = async () => {
+      try {
+        const tSnap = await getDocs(query(collection(db, 'teachers')));
+        const tList = tSnap.docs.map((d) => ({ id: d.id, name: (d.data() as any).fullName || d.id }));
+        setTeachers(tList);
+      } catch (e) {
+        console.error('Failed to load teachers:', e);
+      }
+      try {
+        const nSnap = await getDocs(query(collection(db, 'notifications'), limit(100)));
+        const rows: AdminNotificationRow[] = nSnap.docs
+          .map((docSnap) => {
+            const data = docSnap.data() as any;
+            const created = data.createdAt?.toDate?.()?.toISOString?.() || data.createdAt || new Date().toISOString();
+            return {
+              id: docSnap.id,
+              type: String(data.type || 'info'),
+              title: String(data.title || ''),
+              message: String(data.message || ''),
+              sender: 'الإدارة',
+              createdDate: String(created),
+              totalRecipients: 1,
+            } as AdminNotificationRow;
+          })
+          .filter((row, idx) => {
+            const data = nSnap.docs[idx].data() as any;
+            return !!row.title && !!row.message && String(data.origin || '') === 'admin';
+          });
+        rows.sort((a, b) => new Date(b.createdDate).getTime() - new Date(a.createdDate).getTime());
+        setNotifications(rows);
+      } catch (e) {
+        console.error('Failed to load notifications:', e);
+      }
+    };
+    run();
+  }, []);
 
   const getTypeIcon = (type: string) => {
     switch (type) {
@@ -133,27 +135,16 @@ const Notifications: React.FC = () => {
     }
   };
 
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case 'sent':
-        return <Badge variant="default" className="bg-green-100 text-green-800">مرسل</Badge>;
-      case 'draft':
-        return <Badge variant="secondary">مسودة</Badge>;
-      case 'scheduled':
-        return <Badge variant="outline" className="border-blue-500 text-blue-600">مجدول</Badge>;
-      default:
-        return <Badge variant="secondary">{status}</Badge>;
-    }
-  };
+  const getStatusBadge = (status: string) => <Badge variant="secondary">{status}</Badge>;
 
-  const filteredNotifications = notifications.filter(notification => {
-    const matchesSearch = notification.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         notification.message.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesType = typeFilter === 'all' || notification.type === typeFilter;
-    const matchesStatus = statusFilter === 'all' || notification.status === statusFilter;
-    
-    return matchesSearch && matchesType && matchesStatus;
-  });
+  const filteredNotifications = useMemo(() => {
+    return notifications.filter((notification) => {
+      const matchesSearch = notification.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        notification.message.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchesType = typeFilter === 'all' || notification.type === (typeFilter as any);
+      return matchesSearch && matchesType;
+    });
+  }, [notifications, searchTerm, typeFilter]);
 
   const handleSelectAll = (checked: boolean) => {
     if (checked) {
@@ -177,12 +168,86 @@ const Notifications: React.FC = () => {
   };
 
   const handleMarkAsRead = () => {
-    setNotifications(notifications.map(n => 
-      selectedNotifications.includes(n.id) 
-        ? { ...n, readBy: [...n.readBy, 'current-user'] }
-        : n
-    ));
     setSelectedNotifications([]);
+  };
+
+  const handleCreateNotification = async () => {
+    if (!newTitle.trim() || !newMessage.trim()) return;
+    let recipients: string[] = [];
+    if (recipientScope === 'all') {
+      recipients = teachers.map((t) => t.id);
+    } else if (recipientTeacherId) {
+      recipients = [recipientTeacherId];
+    }
+    if (recipientScope !== 'all' && recipients.length === 0) return;
+    const createdRows: AdminNotificationRow[] = [];
+    if (recipientScope === 'all') {
+      if (!teachers || teachers.length === 0) return;
+      const tasks = teachers.map(async (t) => {
+        try {
+          const id = await NotificationService.createNotification({
+            userId: t.id,
+            title: newTitle.trim(),
+            message: newMessage.trim(),
+            type: newType as any,
+            teacherId: t.id,
+            expiresAt: expiresAtLocal ? new Date(expiresAtLocal).toISOString() : undefined,
+            linkText: linkText.trim() || undefined,
+            linkUrl: linkUrl.trim() || undefined,
+            origin: 'admin',
+          });
+          createdRows.push({
+            id,
+            type: newType,
+            title: newTitle.trim(),
+            message: newMessage.trim(),
+            sender: 'الإدارة',
+            createdDate: new Date().toISOString(),
+            totalRecipients: 1,
+          });
+        } catch (e) {
+          console.error('Failed to create notification for teacher', t.id, e);
+        }
+      });
+      await Promise.allSettled(tasks);
+    } else {
+      const tasks = recipients.map(async (uid) => {
+        try {
+          const id = await NotificationService.createNotification({
+            userId: uid,
+            title: newTitle.trim(),
+            message: newMessage.trim(),
+            type: newType as any,
+            teacherId: uid,
+            expiresAt: expiresAtLocal ? new Date(expiresAtLocal).toISOString() : undefined,
+            linkText: linkText.trim() || undefined,
+            linkUrl: linkUrl.trim() || undefined,
+            origin: 'admin',
+          });
+          createdRows.push({
+            id,
+            type: newType,
+            title: newTitle.trim(),
+            message: newMessage.trim(),
+            sender: 'الإدارة',
+            createdDate: new Date().toISOString(),
+            totalRecipients: 1,
+          });
+        } catch (e) {
+          console.error('Failed to create notification for teacher', uid, e);
+        }
+      });
+      await Promise.allSettled(tasks);
+    }
+    setNotifications((prev) => [...createdRows, ...prev]);
+    setIsNewDialogOpen(false);
+    setNewTitle('');
+    setNewMessage('');
+    setRecipientScope('all');
+    setRecipientTeacherId('');
+    setExpiresAtLocal('');
+    setLinkText('');
+    setLinkUrl('');
   };
 
   return (
@@ -260,10 +325,103 @@ const Notifications: React.FC = () => {
                         </Button>
                       </>
                     )}
-                    <Button>
-                      <Bell className="h-4 w-4 mr-2" />
-                      {language === 'ar' ? 'إشعار جديد' : 'New Notification'}
-                    </Button>
+                    <Dialog open={isNewDialogOpen} onOpenChange={setIsNewDialogOpen}>
+                      <DialogTrigger asChild>
+                        <Button>
+                          <Bell className="h-4 w-4 mr-2" />
+                          {language === 'ar' ? 'إشعار جديد' : 'New Notification'}
+                        </Button>
+                      </DialogTrigger>
+                      <DialogContent className="max-w-lg">
+                        <DialogHeader>
+                          <DialogTitle>{language === 'ar' ? 'إنشاء إشعار جديد' : 'Create New Notification'}</DialogTitle>
+                        </DialogHeader>
+                        <div className="space-y-4">
+                          <div>
+                            <Label className="mb-1 block">{language === 'ar' ? 'العنوان' : 'Title'}</Label>
+                            <Input value={newTitle} onChange={(e) => setNewTitle(e.target.value)} />
+                          </div>
+                          <div>
+                            <Label className="mb-1 block">{language === 'ar' ? 'الرسالة' : 'Message'}</Label>
+                            <Input value={newMessage} onChange={(e) => setNewMessage(e.target.value)} />
+                          </div>
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <Label className="mb-1 block">{language === 'ar' ? 'النوع' : 'Type'}</Label>
+                              <Select value={newType} onValueChange={(v) => setNewType(v as any)}>
+                                <SelectTrigger>
+                                  <SelectValue />
+                                </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="info">{language === 'ar' ? 'معلومات' : 'Info'}</SelectItem>
+                                <SelectItem value="success">{language === 'ar' ? 'نجاح' : 'Success'}</SelectItem>
+                                <SelectItem value="warning">{language === 'ar' ? 'تحذير' : 'Warning'}</SelectItem>
+                                <SelectItem value="error">{language === 'ar' ? 'خطأ' : 'Error'}</SelectItem>
+                                <SelectItem value="announcement">{language === 'ar' ? 'إعلان' : 'Announcement'}</SelectItem>
+                                <SelectItem value="promotion">{language === 'ar' ? 'عرض ترويجي' : 'Promotion'}</SelectItem>
+                                <SelectItem value="maintenance">{language === 'ar' ? 'صيانة النظام' : 'Maintenance'}</SelectItem>
+                                <SelectItem value="update">{language === 'ar' ? 'تحديث' : 'Update'}</SelectItem>
+                                <SelectItem value="event">{language === 'ar' ? 'حدث' : 'Event'}</SelectItem>
+                                <SelectItem value="reminder">{language === 'ar' ? 'تذكير' : 'Reminder'}</SelectItem>
+                                <SelectItem value="payment">{language === 'ar' ? 'دفعات' : 'Payments'}</SelectItem>
+                                <SelectItem value="deadline">{language === 'ar' ? 'موعد نهائي' : 'Deadline'}</SelectItem>
+                                <SelectItem value="new_feature">{language === 'ar' ? 'ميزة جديدة' : 'New Feature'}</SelectItem>
+                              </SelectContent>
+                              </Select>
+                            </div>
+                            <div>
+                              <Label className="mb-1 block">{language === 'ar' ? 'المستلمون' : 'Recipients'}</Label>
+                              <Select value={recipientScope} onValueChange={(v) => setRecipientScope(v as any)}>
+                                <SelectTrigger>
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="all">{language === 'ar' ? 'جميع المدرسين' : 'All Teachers'}</SelectItem>
+                                  <SelectItem value="specific">{language === 'ar' ? 'مدرس محدد' : 'Specific Teacher'}</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          </div>
+                          <div>
+                            <Label className="mb-1 block">{language === 'ar' ? 'تاريخ انتهاء الإشعار' : 'Notification Expiry'}</Label>
+                            <Input type="datetime-local" value={expiresAtLocal} onChange={(e) => setExpiresAtLocal(e.target.value)} />
+                          </div>
+                          {recipientScope === 'specific' && (
+                            <div>
+                              <Label className="mb-1 block">{language === 'ar' ? 'اختر المدرس' : 'Select Teacher'}</Label>
+                              <Select value={recipientTeacherId} onValueChange={setRecipientTeacherId}>
+                                <SelectTrigger>
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {teachers.map((t) => (
+                                    <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          )}
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <Label className="mb-1 block">{language === 'ar' ? 'نص الزر' : 'Button Text'}</Label>
+                              <Input value={linkText} onChange={(e) => setLinkText(e.target.value)} placeholder={language === 'ar' ? 'مثلاً: فتح' : 'e.g., Open'} />
+                            </div>
+                            <div>
+                              <Label className="mb-1 block">{language === 'ar' ? 'رابط الزر' : 'Button Link URL'}</Label>
+                              <Input value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} placeholder="https://..." />
+                            </div>
+                          </div>
+                          <div className="flex justify-end gap-2">
+                            <Button variant="outline" onClick={() => setIsNewDialogOpen(false)}>
+                              {language === 'ar' ? 'إلغاء' : 'Cancel'}
+                            </Button>
+                            <Button onClick={handleCreateNotification}>
+                              {language === 'ar' ? 'إرسال' : 'Send'}
+                            </Button>
+                          </div>
+                        </div>
+                      </DialogContent>
+                    </Dialog>
                   </div>
                 </div>
               </CardContent>
@@ -329,13 +487,24 @@ const Notifications: React.FC = () => {
                         <TableCell>
                           <div className="text-sm">
                             <div>{notification.totalRecipients} {language === 'ar' ? 'مستخدم' : 'users'}</div>
-                            <div className="text-gray-500">
-                              {notification.readBy.length} {language === 'ar' ? 'قرأوا' : 'read'}
-                            </div>
                           </div>
                         </TableCell>
-                        <TableCell>{notification.createdDate}</TableCell>
-                        <TableCell>{getStatusBadge(notification.status)}</TableCell>
+                        <TableCell>{(() => {
+                          try {
+                            const d = new Date(notification.createdDate);
+                            const now = new Date();
+                            const same = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+                            const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+                            const isTomorrow = d.getFullYear() === tomorrow.getFullYear() && d.getMonth() === tomorrow.getMonth() && d.getDate() === tomorrow.getDate();
+                            const timeStr = d.toLocaleTimeString(language === 'ar' ? 'ar-EG' : 'en-US', { hour: 'numeric', minute: '2-digit' });
+                            if (same) return language === 'ar' ? `اليوم ${timeStr}` : `today ${timeStr}`;
+                            if (isTomorrow) return language === 'ar' ? `غداً ${timeStr}` : `tomorrow ${timeStr}`;
+                            return d.toLocaleDateString(language === 'ar' ? 'ar-EG' : 'en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+                          } catch {
+                            return notification.createdDate;
+                          }
+                        })()}</TableCell>
+                        <TableCell>{getStatusBadge('sent')}</TableCell>
                         <TableCell>
                           <div className="flex items-center gap-2">
                             <Dialog>
@@ -375,19 +544,9 @@ const Notifications: React.FC = () => {
                                         {notification.totalRecipients} {language === 'ar' ? 'مستخدم' : 'users'}
                                       </p>
                                     </div>
-                                    <div>
-                                      <h4 className="font-medium mb-1">{language === 'ar' ? 'معدل القراءة' : 'Read Rate'}</h4>
-                                      <p className="text-sm text-gray-600">
-                                        {Math.round((notification.readBy.length / notification.totalRecipients) * 100)}%
-                                      </p>
-                                    </div>
+                                    
                                   </div>
-                                  {notification.scheduledDate && (
-                                    <div>
-                                      <h4 className="font-medium mb-1">{language === 'ar' ? 'تاريخ الإرسال المجدول' : 'Scheduled Date'}</h4>
-                                      <p className="text-sm text-gray-600">{notification.scheduledDate}</p>
-                                    </div>
-                                  )}
+                                  
                                 </div>
                               </DialogContent>
                             </Dialog>

@@ -11,12 +11,14 @@ import { useLanguage } from "@/contexts/LanguageContext";
 import { useAuth } from "@/hooks/useAuth";
 import { auth, db } from "@/firebase/config";
 import { sendEmailVerification, onAuthStateChanged } from "firebase/auth";
-import { doc, getDoc, updateDoc, setDoc, collection, query, where, getDocs, deleteDoc, onSnapshot, orderBy, addDoc, serverTimestamp } from "firebase/firestore";
+import { doc, getDoc, updateDoc, setDoc, collection, query, where, getDocs, deleteDoc, onSnapshot, orderBy, addDoc, serverTimestamp, limit } from "firebase/firestore";
 import { toast } from 'sonner';
 import DashboardHeader from "@/components/DashboardHeader";
 import TeacherSidebar from "@/components/TeacherSidebar";
 import FloatingSupportChat from "@/components/FloatingSupportChat";
 import { CourseService } from "@/services/courseService";
+import { NotificationService } from "@/services/notificationService";
+const BROADCAST_TEACHERS = "__ALL_TEACHERS__";
 import { TeacherService } from "@/services/teacherService";
 import { StudentService, StudentProfile } from "@/services/studentService";
 import { 
@@ -570,7 +572,156 @@ export const TeacherDashboard = () => {
   const [isSendingEmail, setIsSendingEmail] = useState(false);
   
   const [courses, setCourses] = useState<Course[]>([]);
-  const [notifications] = useState<Notification[]>([]);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [notificationCount, setNotificationCount] = useState<number>(0);
+  const [personalList, setPersonalList] = useState<any[]>([]);
+  const [broadcastList, setBroadcastList] = useState<any[]>([]);
+  const [newNotifPreview, setNewNotifPreview] = useState<{ title: string; message: string; type?: string } | null>(null);
+  const prevIdsRef = useRef<Set<string>>(new Set());
+  const didInitRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    const loadNotifications = async () => {
+      try {
+        const uid = user?.uid || (user as any)?.id;
+        if (!uid) {
+          setNotifications([]);
+          setNotificationCount(0);
+          return;
+        }
+        const list = await NotificationService.getUserNotifications(uid, 50);
+        const broadcastSnap = await getDocs(query(collection(db, 'notifications'), where('userId', '==', BROADCAST_TEACHERS), limit(50)));
+        const broadcast = broadcastSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+        const merged = [...list, ...broadcast];
+        const nowMs = Date.now();
+        const filtered = merged.filter((n: any) => {
+          const ex = (n.expiresAt as any);
+          const exMs = ex?.toDate?.()?.getTime?.() || (typeof ex === 'string' ? new Date(ex).getTime() : undefined);
+          return !exMs || nowMs < exMs;
+        });
+        const mapped = filtered.map((n) => ({
+          id: String(n.id || ''),
+          title: String(n.title || ''),
+          message: String(n.message || ''),
+          time: typeof n.createdAt === 'string' ? n.createdAt : new Date().toISOString(),
+          type: (n.type as any) || 'info',
+          _isRead: !!(n as any).isRead,
+          linkText: (n as any).linkText,
+          linkUrl: (n as any).linkUrl,
+        }));
+        setPersonalList(mapped);
+        setNotificationCount(mapped.filter((n) => !(n as any)._isRead).length);
+      } catch (e) {
+        console.error('Failed to load teacher notifications:', e);
+      }
+    };
+    loadNotifications();
+  }, [user?.uid]);
+
+  useEffect(() => {
+    const uid = user?.uid || (user as any)?.id;
+    if (!uid) return;
+    const qPersonal = query(collection(db, 'notifications'), where('userId', '==', uid));
+    const qBroadcast = query(collection(db, 'notifications'), where('userId', '==', BROADCAST_TEACHERS));
+    const unsubPersonal = onSnapshot(qPersonal, (snap) => {
+      try {
+        const list = snap.docs.map((d) => {
+          const data: any = d.data();
+          const created = data.createdAt?.toDate?.()?.toISOString?.() || data.createdAt || new Date().toISOString();
+          return {
+            id: d.id,
+            title: String(data.title || ''),
+            message: String(data.message || ''),
+            time: String(created),
+            type: (data.type as any) || 'info',
+            _isRead: !!data.isRead,
+            _expiresMs: (() => {
+              try {
+                const ex = data.expiresAt;
+                const ms = ex?.toDate?.()?.getTime?.() || (typeof ex === 'string' ? new Date(ex).getTime() : undefined);
+                return typeof ms === 'number' ? ms : undefined;
+              } catch { return undefined; }
+            })(),
+            linkText: data.linkText,
+            linkUrl: data.linkUrl,
+          } as any;
+        });
+        const nowMs = Date.now();
+        const visible = list.filter((n: any) => !n._expiresMs || nowMs < n._expiresMs);
+        visible.sort((a: any, b: any) => new Date(b.time).getTime() - new Date(a.time).getTime());
+        setPersonalList(visible);
+        const unread = visible.filter((n: any) => !n._isRead).length;
+        setNotificationCount(unread);
+      } catch (e) {
+        console.error('Failed to parse live notifications:', e);
+      }
+    }, (err) => {
+      console.error('Notifications live subscription error:', err);
+    });
+    const unsubBroadcast = onSnapshot(qBroadcast, (snap) => {
+      try {
+        const list = snap.docs.map((d) => {
+          const data: any = d.data();
+          const created = data.createdAt?.toDate?.()?.toISOString?.() || data.createdAt || new Date().toISOString();
+          return {
+            id: d.id,
+            title: String(data.title || ''),
+            message: String(data.message || ''),
+            time: String(created),
+            type: (data.type as any) || 'info',
+            _isRead: !!data.isRead,
+            _expiresMs: (() => {
+              try {
+                const ex = data.expiresAt;
+                const ms = ex?.toDate?.()?.getTime?.() || (typeof ex === 'string' ? new Date(ex).getTime() : undefined);
+                return typeof ms === 'number' ? ms : undefined;
+              } catch { return undefined; }
+            })(),
+            linkText: data.linkText,
+            linkUrl: data.linkUrl,
+          } as any;
+        });
+        const nowMs = Date.now();
+        const visible = list.filter((n: any) => !n._expiresMs || nowMs < n._expiresMs);
+        visible.sort((a: any, b: any) => new Date(b.time).getTime() - new Date(a.time).getTime());
+        setBroadcastList(visible);
+      } catch (e) {
+        console.error('Failed to parse broadcast notifications:', e);
+      }
+    }, (err) => console.error('Broadcast notifications subscription error:', err));
+    return () => { try { unsubPersonal(); unsubBroadcast(); } catch {} };
+  }, [user?.uid]);
+
+  useEffect(() => {
+    const combine = () => {
+      const merged = [
+        ...personalList.map((n: any) => ({ id: n.id, title: n.title, message: n.message, time: n.time, type: n.type, linkText: n.linkText, linkUrl: n.linkUrl })),
+        ...broadcastList.map((n: any) => ({ id: n.id, title: n.title, message: n.message, time: n.time, type: n.type, linkText: n.linkText, linkUrl: n.linkUrl }))
+      ];
+      const seen = new Set<string>();
+      const uniq = merged.filter((x) => {
+        if (seen.has(x.id)) return false;
+        seen.add(x.id);
+        return true;
+      });
+      uniq.sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
+      setNotifications(uniq);
+      try {
+        const prev = prevIdsRef.current;
+        const incoming = new Set<string>(uniq.map((x) => x.id));
+        if (didInitRef.current) {
+          const firstNew = uniq.find((x) => !prev.has(x.id));
+          if (firstNew) {
+            setNewNotifPreview({ title: firstNew.title, message: firstNew.message, type: firstNew.type });
+          }
+        } else {
+          didInitRef.current = true;
+        }
+        prevIdsRef.current = incoming;
+      } catch {}
+    };
+    combine();
+  }, [personalList, broadcastList]);
   const [isLoadingCourses, setIsLoadingCourses] = useState(true);
   
   const [linkedStudents, setLinkedStudents] = useState<any[]>([]);
@@ -1065,7 +1216,14 @@ export const TeacherDashboard = () => {
 
   return (
     <div className="min-h-screen bg-background" dir={language === 'ar' ? 'rtl' : 'ltr'}>
-      <DashboardHeader studentName={displayTeacherName} notificationCount={0} />
+      <DashboardHeader studentName={displayTeacherName} notificationCount={notificationCount} notifications={notifications} newNotificationPreview={newNotifPreview} onPreviewClear={() => setNewNotifPreview(null)} onNotificationsOpen={async () => {
+        try {
+          const uid = user?.uid || (user as any)?.id;
+          if (uid) await NotificationService.markAllAsRead(uid);
+        } catch {}
+        setNotificationCount(0);
+        setNewNotifPreview(null);
+      }} />
       
       <div className="flex min-h-[calc(100vh-4rem)]">
         <TeacherSidebar isSubscriptionApproved={isSubscriptionApproved} />
@@ -1584,8 +1742,7 @@ export const TeacherDashboard = () => {
               </Card>
             </div>
 
-            {/* Notifications Section (visible only for subscribed teachers) */}
-            {isSubscriptionApproved && (
+            {/* Notifications Section */}
             <div>
               <Card>
                 <CardHeader>
@@ -1598,18 +1755,32 @@ export const TeacherDashboard = () => {
                   {notifications.length === 0 ? (
                     <EmptyNotificationsState />
                   ) : (
-                    <div className="space-y-4">
+                    <div className="space-y-4" dir={language === 'ar' ? 'rtl' : 'ltr'}>
                       {notifications.map((notification) => (
                         <div key={notification.id} className="p-3 border rounded-lg">
-                          <div className="flex items-start justify-between">
-                            <div className="flex-1">
+                          <div className={`flex items-start justify-between ${language === 'ar' ? 'flex-row-reverse' : ''}`}>
+                            <div className={`flex-1 ${language === 'ar' ? 'text-right' : ''}`}>
                               <h4 className="text-sm font-medium">{notification.title}</h4>
                               <p className="text-xs text-muted-foreground mt-1">
                                 {notification.message}
                               </p>
                               <p className="text-xs text-muted-foreground mt-2">
-                                <Clock className="h-3 w-3 inline mr-1" />
-                                {notification.time}
+                                <Clock className={`h-3 w-3 inline ${language === 'ar' ? 'ml-1' : 'mr-1'}`} />
+                                {(() => {
+                                  try {
+                                    const d = new Date(notification.time);
+                                    const now = new Date();
+                                    const same = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+                                    const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+                                    const isTomorrow = d.getFullYear() === tomorrow.getFullYear() && d.getMonth() === tomorrow.getMonth() && d.getDate() === tomorrow.getDate();
+                                    const timeStr = d.toLocaleTimeString(language === 'ar' ? 'ar-EG' : 'en-US', { hour: 'numeric', minute: '2-digit' });
+                                    if (same) return language === 'ar' ? `اليوم ${timeStr}` : `today ${timeStr}`;
+                                    if (isTomorrow) return language === 'ar' ? `غداً ${timeStr}` : `tomorrow ${timeStr}`;
+                                    return d.toLocaleDateString(language === 'ar' ? 'ar-EG' : 'en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+                                  } catch {
+                                    return notification.time;
+                                  }
+                                })()}
                               </p>
                             </div>
                             <Badge 
@@ -1629,7 +1800,6 @@ export const TeacherDashboard = () => {
                 </CardContent>
               </Card>
             </div>
-            )}
           </div>
           )}
 

@@ -15,6 +15,7 @@ const Login = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isSuspended, setIsSuspended] = useState(false);
+  const [isUnavailable, setIsUnavailable] = useState(false);
   const { language, t } = useLanguage();
   const { login, loginWithGoogle, loginWithFacebook, loading, error } = useAuth();
   const navigate = useNavigate();
@@ -41,6 +42,13 @@ const Login = () => {
           language === 'ar' 
             ? 'تم تعليق حسابك. يرجى التواصل مع الدعم الفني للمساعدة.' 
             : 'Your account has been suspended. Please contact support for assistance.'
+        );
+      } else if (error.message === 'account_not_available') {
+        setIsUnavailable(true);
+        toast.error(
+          language === 'ar' 
+            ? 'هذا الحساب غير متوفر. يرجى التواصل مع الدعم الفني.' 
+            : 'This account is not available. Please contact support.'
         );
       } else {
         toast.error(language === 'ar' ? 'خطأ في تسجيل الدخول' : 'Login failed');
@@ -72,6 +80,12 @@ const Login = () => {
           language === 'ar' 
             ? 'تم تعليق حسابك. يرجى التواصل مع الدعم الفني للمساعدة.' 
             : 'Your account has been suspended. Please contact support for assistance.'
+        );
+      } else if (error.message === 'account_not_available') {
+        toast.error(
+          language === 'ar' 
+            ? 'هذا الحساب غير متوفر. يرجى التواصل مع الدعم الفني.' 
+            : 'This account is not available. Please contact support.'
         );
       } else {
         toast.error(language === 'ar' ? 'خطأ في تسجيل الدخول' : 'Login failed');
@@ -111,6 +125,25 @@ const Login = () => {
                   {language === 'ar' 
                     ? 'لا يمكنك تسجيل الدخول حاليًا. يرجى التواصل مع الدعم الفني للمساعدة.' 
                     : 'You cannot log in at this time. Please contact support for assistance.'}
+                </p>
+              </div>
+            )}
+            {isUnavailable && (
+              <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 px-4 py-3 rounded relative" role="alert">
+                <div className="flex items-center">
+                  <svg className="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2h-1V9z" clipRule="evenodd"></path>
+                  </svg>
+                  <span className="font-medium">
+                    {language === 'ar' 
+                      ? 'هذا الحساب غير متوفر' 
+                      : 'This account is not available'}
+                  </span>
+                </div>
+                <p className="mt-2 text-sm">
+                  {language === 'ar' 
+                    ? 'يرجى التواصل مع الدعم الفني للمساعدة.' 
+                    : 'Please contact support for assistance.'}
                 </p>
               </div>
             )}

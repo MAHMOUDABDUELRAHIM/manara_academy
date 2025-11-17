@@ -18,12 +18,17 @@ export interface Notification {
   userId: string;
   title: string;
   message: string;
-  type: 'info' | 'success' | 'warning' | 'course_added';
+  type: 'info' | 'success' | 'warning' | 'error' | 'course_added' | 'course_enrollment' | string;
   isRead: boolean;
   readAt?: string;
   createdAt: string | Timestamp;
   courseId?: string;
   teacherId?: string;
+  expiresAt?: string | Timestamp;
+  audience?: 'teachers_all' | 'all_users';
+  linkText?: string;
+  linkUrl?: string;
+  origin?: 'admin' | 'system' | 'auto';
 }
 
 export class NotificationService {
@@ -33,11 +38,14 @@ export class NotificationService {
    */
   static async createNotification(notification: Omit<Notification, 'id' | 'createdAt' | 'isRead'>): Promise<string> {
     try {
-      const newNotification = {
+      const base = {
         ...notification,
         isRead: false,
         createdAt: serverTimestamp()
-      };
+      } as any;
+      const newNotification = Object.fromEntries(
+        Object.entries(base).filter(([, v]) => v !== undefined)
+      );
 
       const docRef = await addDoc(collection(db, 'notifications'), newNotification);
       console.log('Notification created with ID:', docRef.id);

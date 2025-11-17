@@ -319,7 +319,7 @@ export const AddLesson = () => {
                     const usedSinceReset = Math.max(0, lastUsed - (isNaN(baseline) ? 0 : baseline));
                     const usedGb = usedSinceReset / (1024 * 1024 * 1024);
                     const pct = capGb > 0 ? Math.min(100, Math.max(0, (usedGb / capGb) * 100)) : 0;
-                    await updateDoc(doc(db, 'teachers', teacherId), { storageOver95Pct: pct >= 95, updatedAt: new Date().toISOString() });
+                    await updateDoc(doc(db, 'teachers', teacherId), { storageOver80Pct: pct >= 80, storageOver95Pct: pct >= 95, updatedAt: new Date().toISOString() });
                   } catch {}
                 }
               })();

@@ -90,6 +90,7 @@ export default function InvitePage() {
   const [brandLogoScale, setBrandLogoScale] = useState<number>(1)
   const [brandNameScale, setBrandNameScale] = useState<number>(1)
   const [serviceUnavailable, setServiceUnavailable] = useState<boolean>(false)
+  const [hasApprovedActiveSubscription, setHasApprovedActiveSubscription] = useState<boolean>(false)
   // Readonly preview mode (opened from teacher editor)
   const params = new URLSearchParams(location.search)
   const isReadOnly = params.get('readonly') === '1' || params.get('readonly') === 'true'
@@ -212,7 +213,7 @@ useEffect(() => {
             }
           } catch {}
           const trialExpired = !!createdMs && (Date.now() - createdMs >= trialMs)
-          setServiceUnavailable(!validApproved && trialExpired)
+          setServiceUnavailable(false)
         } catch {}
         
         // حفظ teacherId في localStorage للاستخدام بعد تسجيل الدخول
@@ -488,7 +489,10 @@ useEffect(() => {
           const expApproved: any = approvedP?.expiresAt?.toDate?.() || approvedP?.expiresAt || null
           const validApproved = expApproved instanceof Date ? (Date.now() < expApproved.getTime()) : !!approvedP
           const hasActive = !!validApproved
-          if (!cancelled) setServiceUnavailable(!(hasActive) && trialExpired)
+          if (!cancelled) {
+            setHasApprovedActiveSubscription(hasActive)
+            setServiceUnavailable(false)
+          }
         })
       } catch {}
     }
@@ -720,7 +724,7 @@ useEffect(() => {
         </div>
       </header>
       {/* Readonly overlay to block interactions when previewed from editor */}
-      {isReadOnly && (
+      {isReadOnly && !hasApprovedActiveSubscription && (
         <div
           className="fixed inset-0 z-[100]"
           style={{ background: 'transparent' }}
@@ -729,15 +733,7 @@ useEffect(() => {
           onMouseUp={(e) => { e.preventDefault(); e.stopPropagation(); }}
         />
       )}
-      {serviceUnavailable && (
-        <div
-          className="fixed inset-0 z-[100]"
-          style={{ background: 'transparent' }}
-          onClick={(e) => { e.preventDefault(); e.stopPropagation(); toast.error(language === 'ar' ? 'الخدمة غير متوفرة في الوقت حالي' : 'Service is not available at the moment'); }}
-          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
-          onMouseUp={(e) => { e.preventDefault(); e.stopPropagation(); }}
-        />
-      )}
+      
       {/* Hero Section (reusable component) */}
       <InviteHero
         language={language}

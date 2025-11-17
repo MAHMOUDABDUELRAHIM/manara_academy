@@ -308,6 +308,8 @@ const PaymentsPayouts: React.FC = () => {
             usageResetAt: new Date().toISOString(),
             s3UsageBytes: 0,
             extraStorageGB: 0,
+            storageOver80Pct: false,
+            storageOver95Pct: false,
             updatedAt: new Date().toISOString(),
           });
         }
@@ -349,7 +351,7 @@ const PaymentsPayouts: React.FC = () => {
       const tdata: any = tSnap.exists() ? tSnap.data() : {};
       const currentExtra: number = typeof tdata?.extraStorageGB === 'number' ? tdata.extraStorageGB : 0;
       const nextExtra = currentExtra + addonGB;
-      await updateDoc(tRef, { extraStorageGB: nextExtra, updatedAt: new Date().toISOString() });
+      await updateDoc(tRef, { extraStorageGB: nextExtra, storageOver80Pct: false, storageOver95Pct: false, updatedAt: new Date().toISOString() });
       await updateDoc(pRef, { status: 'approved', approvedAt: serverTimestamp(), approvedBy: auth.currentUser?.uid || null, approvedAddonGB: addonGB });
       toast.success(language === 'ar' ? 'تمت الموافقة على المساحة الإضافية وزيادتها للمدرس.' : 'Storage add-on approved and applied to teacher.');
     } catch (e) {

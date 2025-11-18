@@ -221,11 +221,11 @@ export default function StorageAddon() {
   }, [user?.uid, language]);
 
   return (
-    <div className="min-h-screen bg-gray-50" dir={language === 'ar' ? 'rtl' : 'ltr'}>
-      <DashboardHeader />
-      <div className="flex">
+    <div className="min-h-screen bg-gray-50 pt-16" dir={language === 'ar' ? 'rtl' : 'ltr'}>
+      <DashboardHeader fixed />
+      <div className="flex min-h-[calc(100vh-4rem)]">
         <TeacherSidebar isSubscriptionApproved={true} />
-        <main className="flex-1 p-4 md:p-6">
+        <main className="md:ml-64 flex-1 p-4 md:p-6 overflow-y-auto">
           <div className="space-y-6">
             {bannerText && (
               <div className="rounded-md border border-[#2c4656]/30 bg-[#2c4656]/10 p-3 text-sm">

@@ -14,7 +14,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useAuth } from "@/hooks/useAuth";
-import { Bell, LogOut, Settings, Crown, ChevronDown, AlertTriangle } from "lucide-react";
+import { Bell, LogOut, Settings, Crown, ChevronDown, AlertTriangle, Check } from "lucide-react";
 import { toast } from "sonner";
 import { Progress } from "@/components/ui/progress";
 import { TeacherService } from "@/services/teacherService";
@@ -24,11 +24,12 @@ interface DashboardHeaderProps {
   studentName?: string;
   profileImage?: string;
   notificationCount?: number;
-  notifications?: { id: string; title: string; message: string; time: string; type: string }[];
+  notifications?: { id: string; title: string; message: string; time: string; type: string; linkUrl?: string; linkText?: string; isRead?: boolean }[];
   onNotificationsOpen?: () => void;
   newNotificationPreview?: { title: string; message: string; type?: string } | null;
   onPreviewClear?: () => void;
   fixed?: boolean;
+  defaultOpenNotifications?: boolean;
 }
 
 export const DashboardHeader = ({ 
@@ -39,7 +40,8 @@ export const DashboardHeader = ({
   onNotificationsOpen,
   newNotificationPreview,
   onPreviewClear,
-  fixed = false
+  fixed = false,
+  defaultOpenNotifications = false
 }: DashboardHeaderProps) => {
   const { language, t, setLanguage } = useLanguage();
   const { user, logout } = useAuth();
@@ -55,8 +57,30 @@ export const DashboardHeader = ({
     const id = window.setInterval(() => setNowTick(Date.now()), 1000);
     return () => { try { window.clearInterval(id); } catch {} };
   }, []);
+  useEffect(() => {
+    try {
+      if (defaultOpenNotifications) {
+        setShowNotifications(true);
+        if (onNotificationsOpen) onNotificationsOpen();
+      }
+    } catch {}
+  }, [defaultOpenNotifications]);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const lastPreviewKeyRef = useRef<string | null>(null);
+  const BROADCAST_TEACHERS = '__ALL_TEACHERS__';
+  const [headerNotifications, setHeaderNotifications] = useState<{ id: string; title: string; message: string; time: string; type: string; linkText?: string; linkUrl?: string }[]>([]);
+  const [headerNotificationCount, setHeaderNotificationCount] = useState<number>(0);
+  const [newNotificationPreviewInternal, setNewNotificationPreviewInternal] = useState<{ title: string; message: string; type?: string } | null>(null);
+  const initialLoadedRef = useRef<boolean>(false);
+  const prevNotifIdsRef = useRef<Set<string>>(new Set());
+  const [readIds, setReadIds] = useState<Set<string>>(new Set());
+  const syntheticNotifsRef = useRef<{ id: string; title: string; message: string; time: string; type: string; linkText?: string; linkUrl?: string }[]>([]);
+  const isNotifRead = (uidVal: string, idVal: string) => {
+    try { return localStorage.getItem(`notifRead:${uidVal}:${idVal}`) === 'true'; } catch { return false; }
+  };
+  const markNotifRead = (uidVal: string, idVal: string) => {
+    try { localStorage.setItem(`notifRead:${uidVal}:${idVal}`, 'true'); } catch {}
+  };
   const ensureAudioCtx = async () => {
     if (!audioCtxRef.current) {
       const W = window as unknown as { webkitAudioContext?: typeof AudioContext };
@@ -90,13 +114,14 @@ export const DashboardHeader = ({
     o2.stop(now + 0.6);
   };
   useEffect(() => {
-    const key = newNotificationPreview ? `${newNotificationPreview.title}\n${newNotificationPreview.message}\n${newNotificationPreview.type || ''}` : '';
-    const shouldPlay = !!newNotificationPreview && !showNotifications && key && key !== lastPreviewKeyRef.current;
+    const src = newNotificationPreviewInternal;
+    const key = src ? `${src.title}\n${src.message}\n${src.type || ''}` : '';
+    const shouldPlay = !!src && !showNotifications && key && key !== lastPreviewKeyRef.current;
     if (shouldPlay) {
       lastPreviewKeyRef.current = key;
       playNotificationChime();
     }
-  }, [newNotificationPreview, showNotifications]);
+  }, [newNotificationPreviewInternal, showNotifications]);
   const formatNotifTime = (iso?: string) => {
     try {
       const d = iso ? new Date(iso) : new Date();
@@ -192,6 +217,73 @@ export const DashboardHeader = ({
     return () => { cancelled = true; };
   }, []);
 
+  useEffect(() => {
+    initialLoadedRef.current = false;
+    const uid = user?.uid;
+    if (!(user?.role === 'teacher') || !uid) {
+      setHeaderNotifications([]);
+      setHeaderNotificationCount(0);
+      setNewNotificationPreviewInternal(null);
+      return;
+    }
+    let personalDocs: any[] = [];
+    let broadcastDocs: any[] = [];
+    const qPersonal = query(collection(db, 'notifications'), where('userId', '==', uid));
+    const qBroadcast = query(collection(db, 'notifications'), where('userId', '==', BROADCAST_TEACHERS));
+    const updateCombined = () => {
+      try {
+        const listAll = [...personalDocs, ...broadcastDocs];
+        const nowMs = Date.now();
+        const visible = listAll.map((d: any) => {
+          const data: any = d.data ? d.data() : d;
+          const createdIso = data.createdAt?.toDate?.()?.toISOString?.() || data.createdAt || new Date().toISOString();
+          const ex = data.expiresAt;
+          const exMs = ex?.toDate?.()?.getTime?.() || (typeof ex === 'string' ? new Date(ex).getTime() : undefined);
+          const built = {
+            id: String(d.id || data.id || ''),
+            title: String(data.title || ''),
+            message: String(data.message || ''),
+            time: String(createdIso),
+            type: (data.type as any) || 'info',
+            _expiresMs: typeof exMs === 'number' ? exMs : undefined,
+            linkText: data.linkText,
+            linkUrl: data.linkUrl,
+          } as any;
+          (built as any).isRead = isNotifRead(user?.uid || 'anonymous', (built as any).id);
+          return built;
+        }).filter((n: any) => !n._expiresMs || nowMs < n._expiresMs);
+        const synthetic = (syntheticNotifsRef.current || []).map((n) => ({
+          ...n,
+          isRead: isNotifRead(user?.uid || 'anonymous', n.id),
+        }));
+        const combined = [...synthetic, ...visible];
+        const dedupMap = new Map<string, any>();
+        for (const it of combined) {
+          if (!dedupMap.has(it.id)) dedupMap.set(it.id, it);
+        }
+        const finalList = Array.from(dedupMap.values());
+        setHeaderNotifications(finalList as any);
+        setHeaderNotificationCount(finalList.filter((n: any) => !(n as any).isRead).length);
+        const prev = prevNotifIdsRef.current;
+        const currentIds = new Set((finalList as any).map((n: any) => n.id));
+        if (initialLoadedRef.current) {
+          for (const n of visible as any) {
+            if (!prev.has(n.id)) {
+              setNewNotificationPreviewInternal({ title: n.title, message: n.message, type: n.type });
+              break;
+            }
+          }
+        } else {
+          initialLoadedRef.current = true;
+        }
+        prevNotifIdsRef.current = currentIds;
+      } catch {}
+    };
+    const unsubPersonal = onSnapshot(qPersonal, (snap) => { personalDocs = snap.docs; updateCombined(); });
+    const unsubBroadcast = onSnapshot(qBroadcast, (snap) => { broadcastDocs = snap.docs; updateCombined(); });
+    return () => { try { unsubPersonal(); } catch {}; try { unsubBroadcast(); } catch {}; };
+  }, [user?.uid, user?.role]);
+
   // When teacher: observe payments and compute active subscription (approved or pending), storage usage if available
   useEffect(() => {
     let unsub: (() => void) | null = null;
@@ -265,6 +357,60 @@ export const DashboardHeader = ({
           try { localStorage.setItem('hasActiveSubscription', hasActive ? 'true' : 'false'); } catch {}
           setHasApprovedActiveSubscription(!!validApproved);
           try { localStorage.setItem('hasApprovedActiveSubscription', validApproved ? 'true' : 'false'); } catch {}
+
+          try {
+            const latestApproved = approvedP;
+            if (latestApproved && latestApproved.id) {
+              const mk = `paymentNotified:${teacherId}:${latestApproved.id}:approved`;
+              const done = localStorage.getItem(mk) === 'true';
+              if (!done) {
+                const title = language === 'ar' ? 'تمت الموافقة على اشتراكك' : 'Your subscription was approved';
+                const message = language === 'ar'
+                  ? 'تهانينا! تم تفعيل باقتك بنجاح، ويمكنك الآن استخدام جميع مزايا المنصة بدون قيود. لمزيد من التفاصيل حول الباقات وتجديد الاشتراك، انتقل إلى قسم الباقات في لوحة التحكم.'
+                  : 'Congratulations! Your plan is now active and you can use all platform features without limits. For more details and renewal info, visit the Pricing section in your dashboard.';
+                const n = {
+                  id: `${latestApproved.id}:approved`,
+                  title,
+                  message,
+                  time: new Date().toISOString(),
+                  type: 'success',
+                  actionsDisabled: true,
+                } as any;
+                syntheticNotifsRef.current = [n, ...syntheticNotifsRef.current.filter((x) => x.id !== n.id)];
+                setHeaderNotifications((prev) => [n, ...prev.filter((x) => x.id !== n.id)]);
+                setHeaderNotificationCount((c) => c + 1);
+                setNewNotificationPreviewInternal({ title, message, type: 'success' });
+                try { localStorage.setItem(mk, 'true'); } catch {}
+              }
+            }
+            const rejectedList = basePayments
+              .filter(p => p?.status === 'rejected')
+              .sort((a, b) => ((b?.createdAt?.seconds || 0) - (a?.createdAt?.seconds || 0)));
+            const latestRejected = rejectedList[0];
+            if (latestRejected && latestRejected.id) {
+              const mk = `paymentNotified:${teacherId}:${latestRejected.id}:rejected`;
+              const done = localStorage.getItem(mk) === 'true';
+              if (!done) {
+                const title = language === 'ar' ? 'تم رفض طلب الاشتراك' : 'Subscription request rejected';
+                const message = language === 'ar'
+                  ? 'نعتذر، تم رفض طلب الاشتراك. يرجى مراجعة صورة إيصال الدفع ورقم المحفظة والتأكد من وضوح البيانات ثم إعادة إرسال الطلب من جديد. لمساعدتك، يمكنك فتح قسم الباقات من لوحة التحكم ومتابعة الإرشادات.'
+                  : 'Sorry, your subscription request was rejected. Please review the payment screenshot and wallet number, make sure details are clear, and resubmit your request. For guidance, check the Pricing section in your dashboard.';
+                const n = {
+                  id: `${latestRejected.id}:rejected`,
+                  title,
+                  message,
+                  time: new Date().toISOString(),
+                  type: 'warning',
+                  actionsDisabled: true,
+                } as any;
+                syntheticNotifsRef.current = [n, ...syntheticNotifsRef.current.filter((x) => x.id !== n.id)];
+                setHeaderNotifications((prev) => [n, ...prev.filter((x) => x.id !== n.id)]);
+                setHeaderNotificationCount((c) => c + 1);
+                setNewNotificationPreviewInternal({ title, message, type: 'warning' });
+                try { localStorage.setItem(mk, 'true'); } catch {}
+              }
+            }
+          } catch {}
 
           // If subscription expired naturally (no pending and not valid approved), reset add-on storage once
           try {
@@ -685,22 +831,22 @@ export const DashboardHeader = ({
           <div className="order-1 relative">
           <DropdownMenu open={showNotifications} onOpenChange={(v) => {
             setShowNotifications(v);
-            try { if (v) { if (onNotificationsOpen) onNotificationsOpen(); if (onPreviewClear) onPreviewClear(); } } catch {}
+            try { if (v) { if (onNotificationsOpen) onNotificationsOpen(); if (onPreviewClear) onPreviewClear(); } } catch (e) { void e }
           }}>
             <DropdownMenuTrigger asChild>
               <Button ref={bellRef} variant="ghost" size="sm" className="relative">
                 <Bell className="h-5 w-5" />
-                {notificationCount > 0 && (
+                {(((notificationCount && notificationCount > 0) ? notificationCount : headerNotificationCount) > 0) && (
                   <Badge 
                     variant="destructive" 
                     className="absolute -top-1 -right-1 h-5 w-5 rounded-full p-0 flex items-center justify-center text-xs"
                   >
-                    {notificationCount > 9 ? '9+' : notificationCount}
+                    {(((notificationCount && notificationCount > 0) ? notificationCount : headerNotificationCount) > 9) ? '9+' : ((notificationCount && notificationCount > 0) ? notificationCount : headerNotificationCount)}
                   </Badge>
                 )}
               </Button>
             </DropdownMenuTrigger>
-            {!showNotifications && newNotificationPreview && previewPos && (
+            {!showNotifications && newNotificationPreviewInternal && previewPos && (
               <div
                 className={`fixed z-50 w-[220px] max-w-[90vw] rounded-xl border border-border bg-card shadow-xl p-2 animate-in fade-in slide-in-from-top-2 ${language === 'ar' ? 'text-right' : 'text-left'} relative`}
                 style={{ top: previewPos.top, left: previewPos.left, transform: 'translateX(-50%)' }}
@@ -708,10 +854,10 @@ export const DashboardHeader = ({
               >
                 <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-3 h-3 bg-card border border-border rotate-45" />
                 <div className="flex items-center justify-between">
-                  <span className="text-[10px] uppercase tracking-wide text-muted-foreground">{newNotificationPreview.type || 'info'}</span>
+                  <span className="text-[10px] uppercase tracking-wide text-muted-foreground">{newNotificationPreviewInternal?.type || 'info'}</span>
                 </div>
-                <div className="mt-1 text-xs font-medium truncate">{newNotificationPreview.title}</div>
-                <div className="text-[11px] text-muted-foreground mt-1 max-h-12 overflow-hidden">{newNotificationPreview.message}</div>
+                <div className="mt-1 text-xs font-medium truncate">{newNotificationPreviewInternal?.title}</div>
+                <div className="text-[11px] text-muted-foreground mt-1 max-h-12 overflow-hidden">{newNotificationPreviewInternal?.message}</div>
                 <div className="mt-2 flex justify-center">
                   <button
                     type="button"
@@ -721,7 +867,7 @@ export const DashboardHeader = ({
                         setShowNotifications(true);
                         if (onNotificationsOpen) onNotificationsOpen();
                         if (onPreviewClear) onPreviewClear();
-                      } catch {}
+                      } catch (e) { void e }
                     }}
                   >
                     {language === 'ar' ? 'قراءة الكل' : 'Read all'}
@@ -729,12 +875,37 @@ export const DashboardHeader = ({
                 </div>
               </div>
             )}
-            <DropdownMenuContent align="end" className="w-80" onPointerDownCapture={() => { try { onNotificationsOpen && onNotificationsOpen(); } catch {} }}>
-              <div className="p-3 border-b">
-                <h4 className="font-medium">{t('notifications')}</h4>
+            <DropdownMenuContent
+              align="end"
+              className="w-[24rem] z-10"
+              onPointerDownCapture={() => { try { onNotificationsOpen && onNotificationsOpen(); } catch {} }}
+              style={{ fontFamily: language === 'ar' ? "'Noto Naskh Arabic','Cairo','Tajawal', system-ui, sans-serif" : undefined }}
+            >
+              <div className="p-3 border-b flex items-center justify-between">
+                <h4 className="font-medium">{t('notifications')} ({headerNotificationCount})</h4>
+                <button
+                  type="button"
+                  className="text-xs text-primary hover:underline"
+                  onClick={() => {
+                    try {
+                      const uidVal = user?.uid || 'anonymous';
+                      const list = ((notifications && notifications.length > 0) ? notifications : headerNotifications);
+                      list.forEach((n) => { try { localStorage.setItem(`notifRead:${uidVal}:${n.id}`, 'true'); } catch (e) { void e } });
+                      try {
+                        const next = new Set<string>(readIds);
+                        list.forEach((n) => next.add(n.id));
+                        setReadIds(next);
+                      } catch {}
+                      setHeaderNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
+                      setHeaderNotificationCount(0);
+                    } catch (e) { void e }
+                  }}
+                >
+                  {language === 'ar' ? 'تعليم الكل كمقروء' : 'Mark all as seen'}
+                </button>
               </div>
-              <div className="max-h-64 overflow-y-auto">
-                {notifications.length === 0 ? (
+              <div className="max-h-80 overflow-y-auto">
+                {(((notifications && notifications.length > 0) ? notifications : headerNotifications).length === 0) ? (
                   <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
                     <Bell className="h-8 w-8 mb-2 opacity-50" />
                     <p className="text-sm text-center">
@@ -746,42 +917,92 @@ export const DashboardHeader = ({
                   </div>
                 ) : (
                   <div className="divide-y">
-                    {notifications.map((n) => (
-                      <div key={n.id} className="p-3" dir={language === 'ar' ? 'rtl' : 'ltr'}>
+                    {(() => {
+                      const uidVal = user?.uid || 'anonymous';
+                      const rawList = ((notifications && notifications.length > 0) ? notifications : headerNotifications);
+                      const visibleList = rawList.filter((n) => {
+                        const read = readIds.has(n.id) || (n as any).isRead === true || isNotifRead(uidVal, n.id);
+                        return !read;
+                      }).sort((a, b) => {
+                        try {
+                          const titleWelcome = language === 'ar' ? 'مرحبًا بك في منارة' : 'Welcome to Manara';
+                          const titleGuide = language === 'ar' ? 'إرشادات البدء للمدرّس' : 'Getting Started Guide';
+                          const aIsWelcome = a.title === titleWelcome;
+                          const bIsWelcome = b.title === titleWelcome;
+                          const aIsGuide = a.title === titleGuide;
+                          const bIsGuide = b.title === titleGuide;
+                          if (aIsWelcome && !bIsWelcome) return -1;
+                          if (!aIsWelcome && bIsWelcome) return 1;
+                          if (aIsGuide && !bIsGuide) return 1; // guide after welcome
+                          if (!aIsGuide && bIsGuide) return -1;
+                          const ta = new Date(a.time).getTime();
+                          const tb = new Date(b.time).getTime();
+                          return ta - tb; // older first
+                        } catch {
+                          return 0;
+                        }
+                      });
+                      return visibleList.map((n) => (
+                      <div key={n.id} className="p-3 rounded-md transition-colors hover:bg-[#ee7b3d]/10" dir={language === 'ar' ? 'rtl' : 'ltr'}>
                         <div className={`flex items-start justify-between ${language === 'ar' ? 'flex-row-reverse' : ''}`}>
                           <div className={`flex-1 ${language === 'ar' ? 'text-right' : ''}`}>
                             <div className="text-sm font-medium">{n.title}</div>
-                            <div className="text-xs text-muted-foreground mt-1">{n.message}</div>
+                            <div className={`mt-1 text-xs text-muted-foreground whitespace-normal w-full break-words leading-6`}>{n.message}</div>
                             <div className="text-[11px] text-muted-foreground mt-2">{formatNotifTime(n.time)}</div>
                           </div>
                           <div className={`flex items-center gap-2`}>
-                            {n.type && (
+                            {(!(n as any).actionsDisabled) && n.type && (
                               <Badge variant={n.type === 'success' ? 'default' : n.type === 'warning' ? 'destructive' : 'secondary'}>{n.type}</Badge>
                             )}
-                            {(n as any).linkUrl && (
+                            {(() => {
+                              const uidVal = user?.uid || 'anonymous';
+                              const read = readIds.has(n.id) || (n as any).isRead === true || isNotifRead(uidVal, n.id);
+                              if (read) return null;
+                              return (
+                                <button
+                                  type="button"
+                                  className="h-7 w-7 rounded-md border hover:bg-muted flex items-center justify-center"
+                                  onClick={() => {
+                                    try {
+                                      const idVal = n.id;
+                                      const uid = user?.uid || 'anonymous';
+                                      localStorage.setItem(`notifRead:${uid}:${idVal}`, 'true');
+                                      setHeaderNotifications((prev) => prev.filter((x) => x.id !== idVal));
+                                      setHeaderNotificationCount((c) => Math.max(0, c - 1));
+                                      setReadIds((prev) => {
+                                        const next = new Set<string>(prev);
+                                        next.add(idVal);
+                                        return next;
+                                      });
+                                    } catch (e) { void e }
+                                  }}
+                                >
+                                  <Check className="h-4 w-4" />
+                                </button>
+                              );
+                            })()}
+                            {(!(n as any).actionsDisabled) && n.linkUrl && (
                               <button
                                 className="text-xs px-2 py-1 rounded bg-blue-600 text-white hover:bg-blue-700"
                                 onClick={() => {
                                   try {
-                                    const url = (n as any).linkUrl as string;
+                                    const url = n.linkUrl as string;
                                     if (url) window.open(url, '_blank');
-                                  } catch {}
+                                  } catch (e) { void e }
                                 }}
                               >
-                                {((n as any).linkText as string) || (language === 'ar' ? 'فتح' : 'Open')}
+                                {(n.linkText as string) || (language === 'ar' ? 'فتح' : 'Open')}
                               </button>
                             )}
                           </div>
                         </div>
                       </div>
-                    ))}
+                      ));
+                    })()}
                   </div>
                 )}
               </div>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem className="p-3 text-center cursor-pointer">
-                <span className="text-sm text-primary">{t('viewAllNotifications')}</span>
-              </DropdownMenuItem>
+              
             </DropdownMenuContent>
           </DropdownMenu>
           </div>

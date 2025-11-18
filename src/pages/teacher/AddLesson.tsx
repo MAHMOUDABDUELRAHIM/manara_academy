@@ -46,6 +46,58 @@ export const AddLesson = () => {
   const navigate = useNavigate();
   const { language } = useLanguage();
   const { user } = useAuth();
+  const [trialMs, setTrialMs] = useState<number | null>(null);
+  const [createdMs, setCreatedMs] = useState<number | null>(null);
+  const [isSubscriptionApproved, setIsSubscriptionApproved] = useState<boolean>(() => {
+    try { return localStorage.getItem('isSubscriptionApproved') === 'true'; } catch { return false; }
+  });
+  useEffect(() => {
+    const loadTrialAndProfile = async () => {
+      try {
+        // Load trial settings
+        const snap = await import('firebase/firestore').then(({ doc, getDoc }) => getDoc(doc(db, 'settings', 'trial')));
+        if (snap.exists()) {
+          const d = snap.data() as any;
+          const unit = d?.unit === 'minutes' ? 'minutes' : 'days';
+          const value = typeof d?.value === 'number' && d.value > 0 ? d.value : 1;
+          const ms = unit === 'days' ? value * 24 * 60 * 60 * 1000 : value * 60 * 1000;
+          setTrialMs(ms);
+        } else {
+          try {
+            const cached = localStorage.getItem('trialSettings');
+            if (cached) {
+              const parsed = JSON.parse(cached);
+              const unit = parsed?.unit === 'minutes' ? 'minutes' : 'days';
+              const value = typeof parsed?.value === 'number' && parsed.value > 0 ? parsed.value : 1;
+              const ms = unit === 'days' ? value * 24 * 60 * 60 * 1000 : value * 60 * 1000;
+              setTrialMs(ms);
+            }
+          } catch {}
+        }
+      } catch {}
+      try {
+        if (user?.uid) {
+          const profile = await TeacherService.getTeacherByUid(user.uid).catch(() => null);
+          const createdRaw = (profile as any)?.createdAt;
+          let ms: number | null = null;
+          if (typeof createdRaw === 'string') {
+            const t = new Date(createdRaw).getTime();
+            ms = isNaN(t) ? null : t;
+          } else if (createdRaw?.seconds) {
+            ms = createdRaw.seconds * 1000;
+          } else if (createdRaw instanceof Date) {
+            ms = createdRaw.getTime();
+          }
+          setCreatedMs(ms);
+        }
+      } catch {}
+      try {
+        const approvedLS = localStorage.getItem('isSubscriptionApproved') === 'true';
+        setIsSubscriptionApproved(!!approvedLS);
+      } catch {}
+    };
+    loadTrialAndProfile();
+  }, [user?.uid]);
 
   const [lessonData, setLessonData] = useState<LessonData>({
     title: "",
@@ -551,6 +603,49 @@ export const AddLesson = () => {
   const goBack = () => {
     navigate('/teacher-dashboard');
   };
+
+  const trialActive = (() => {
+    if (trialMs == null || createdMs == null) return false;
+    return Date.now() - createdMs < trialMs;
+  })();
+
+  // Gate the page during trial when subscription not approved
+  if (trialActive && !isSubscriptionApproved) {
+    return (
+      <div className="min-h-screen bg-gray-50 pt-16" dir={language === 'ar' ? 'rtl' : 'ltr'}>
+        <DashboardHeader fixed studentName={user?.displayName || ''} />
+        <div className="flex min-h-[calc(100vh-4rem)]">
+          <TeacherSidebar />
+          <main className="md:ml-64 flex-1 p-6 overflow-y-auto">
+            <Card className="border border-gray-200 bg-white shadow-sm">
+              <CardHeader>
+                <CardTitle className="text-[#2c4656]">
+                  {language === 'ar' ? 'إضافة درس' : 'Add Lesson'}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="flex items-start gap-3">
+                  <AlertCircle className="h-6 w-6 text-red-600" />
+                  <div className="text-sm text-gray-700">
+                    {language === 'ar'
+                      ? 'لرفع الفيديوهات الخاصة بالحصة قم بالترقية الآن.'
+                      : 'To upload lesson videos, please upgrade your plan now.'}
+                  </div>
+                </div>
+                <div className="mt-4">
+                  <Button className="bg-[#ee7b3d] hover:bg-[#ee7b3d]/90 text-white" onClick={() => {
+                    try { window.location.href = '/teacher-dashboard#pricing'; } catch { }
+                  }}>
+                    {language === 'ar' ? 'الترقية الآن' : 'Upgrade Now'}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </main>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">

@@ -11,7 +11,7 @@ import { useLanguage } from "@/contexts/LanguageContext";
 import { useAuth } from "@/hooks/useAuth";
 import { auth, db } from "@/firebase/config";
 import { sendEmailVerification, onAuthStateChanged } from "firebase/auth";
-import { doc, getDoc, updateDoc, setDoc, collection, query, where, getDocs, deleteDoc, onSnapshot, orderBy, addDoc, serverTimestamp, limit } from "firebase/firestore";
+import { doc, getDoc, updateDoc, setDoc, collection, query, where, getDocs, deleteDoc, onSnapshot, orderBy, addDoc, serverTimestamp, limit, Timestamp } from "firebase/firestore";
 import { toast } from 'sonner';
 import DashboardHeader from "@/components/DashboardHeader";
 import TeacherSidebar from "@/components/TeacherSidebar";
@@ -76,6 +76,10 @@ interface Notification {
   message: string;
   time: string;
   type: 'info' | 'success' | 'warning';
+  linkText?: string;
+  linkUrl?: string;
+  _isRead?: boolean;
+  _expiresMs?: number;
 }
 
 export const TeacherDashboard = () => {
@@ -83,6 +87,32 @@ export const TeacherDashboard = () => {
   const { user } = useAuth();
   const isArabic = language === 'ar';
   const [showWelcomeTrial, setShowWelcomeTrial] = useState<boolean>(false);
+  const [trialSettings, setTrialSettings] = useState<{ unit: 'days' | 'minutes'; value: number } | null>(null);
+  useEffect(() => {
+    const loadTrial = async () => {
+      try {
+        const snap = await getDoc(doc(db, 'settings', 'trial'));
+        if (snap.exists()) {
+          const d: any = snap.data();
+          const unit = d?.unit === 'minutes' ? 'minutes' : 'days';
+          const value = typeof d?.value === 'number' && d.value > 0 ? d.value : 1;
+          setTrialSettings({ unit, value });
+          try { localStorage.setItem('trialSettings', JSON.stringify({ unit, value })); } catch {}
+        } else {
+          try {
+            const cached = localStorage.getItem('trialSettings');
+            if (cached) {
+              const parsed = JSON.parse(cached);
+              if (parsed && (parsed.unit === 'days' || parsed.unit === 'minutes') && typeof parsed.value === 'number') {
+                setTrialSettings(parsed);
+              }
+            }
+          } catch {}
+        }
+      } catch {}
+    };
+    loadTrial();
+  }, []);
   
   // Teacher Pricing Plans loaded from Firestore
   interface PricingPlanDoc {
@@ -132,16 +162,48 @@ export const TeacherDashboard = () => {
   }, []);
 
   useEffect(() => {
-    try {
-      const isTeacher = user?.role === 'teacher';
-      if (!isTeacher) return;
-      const key = `teacherWelcomeShown:${user?.uid || 'unknown'}`;
-      const already = localStorage.getItem(key) === 'true';
-      if (!already) {
-        setShowWelcomeTrial(true);
-        localStorage.setItem(key, 'true');
-      }
-    } catch {}
+    const checkTrialWelcome = async () => {
+      try {
+        if (user?.role !== 'teacher' || !user?.uid) return;
+        const profile = await TeacherService.getTeacherByUid(user.uid).catch(() => null);
+        const seen = !!(profile as any)?.hasSeenTrialWelcome;
+        if (!seen) {
+          setShowWelcomeTrial(true);
+        }
+      } catch {}
+    };
+    checkTrialWelcome();
+  }, [user?.uid, user?.role]);
+
+  useEffect(() => {
+    const sendWelcomeNotificationOnce = async () => {
+      try {
+        if (user?.role !== 'teacher' || !user?.uid) return;
+        const uid = user.uid;
+        const profile = await TeacherService.getTeacherByUid(uid).catch(() => null);
+        const already = !!(profile as any)?.welcomeNotifCreated;
+        if (!already) {
+          await NotificationService.createNotification({
+            userId: uid,
+            title: 'مرحبًا بك في منارة'
+            , message: 'يسعدنا انضمامك! يمكنك الآن استكشاف المنصة والبدء في إنشاء دوراتك. جرّب الميزات وتعرّف على اللوحة لتعرف كيف تدير المحتوى والطلاب بسهولة.'
+            , type: 'success'
+            , origin: 'system'
+          } as any);
+          await NotificationService.createNotification({
+            userId: uid,
+            title: 'إرشادات البدء للمدرّس'
+            , message: 'ننصحك بالاطلاع على الإرشادات للتعرّف على طريقة استخدام المنصة خطوة بخطوة. إذا واجهت أي مشكلة يمكنك التواصل مع الدعم مباشرة من خلال شات الدعم أو عبر واتساب.'
+            , type: 'info'
+            , origin: 'system'
+            , linkText: 'الإرشادات'
+            , linkUrl: '/teacher-dashboard/invite-students'
+          } as any);
+          await TeacherService.updateTeacherProfile(uid, { welcomeNotifCreated: true } as any);
+        }
+      } catch {}
+    };
+    sendWelcomeNotificationOnce();
   }, [user?.uid, user?.role]);
 
   // Subscription section state
@@ -601,8 +663,8 @@ export const TeacherDashboard = () => {
   const [courses, setCourses] = useState<Course[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [notificationCount, setNotificationCount] = useState<number>(0);
-  const [personalList, setPersonalList] = useState<any[]>([]);
-  const [broadcastList, setBroadcastList] = useState<any[]>([]);
+  const [personalList, setPersonalList] = useState<Notification[]>([]);
+  const [broadcastList, setBroadcastList] = useState<Notification[]>([]);
   const [newNotifPreview, setNewNotifPreview] = useState<{ title: string; message: string; type?: string } | null>(null);
   const prevIdsRef = useRef<Set<string>>(new Set());
   const didInitRef = useRef<boolean>(false);
@@ -618,28 +680,45 @@ export const TeacherDashboard = () => {
         }
         const list = await NotificationService.getUserNotifications(uid, 50);
         const broadcastSnap = await getDocs(query(collection(db, 'notifications'), where('userId', '==', BROADCAST_TEACHERS), limit(50)));
-        const broadcast = broadcastSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
-        const merged = [...list, ...broadcast];
+        const broadcast = broadcastSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        const merged = [...list, ...broadcast] as Array<Record<string, unknown>>;
         const nowMs = Date.now();
-        const filtered = merged.filter((n: any) => {
-          const ex = (n.expiresAt as any);
-          const exMs = ex?.toDate?.()?.getTime?.() || (typeof ex === 'string' ? new Date(ex).getTime() : undefined);
+        const filtered = merged.filter((n) => {
+          const ex = (n as { expiresAt?: unknown }).expiresAt;
+          let exMs: number | undefined;
+          if (ex instanceof Timestamp) exMs = ex.toDate().getTime();
+          else if (typeof ex === 'string') exMs = new Date(ex).getTime();
           return !exMs || nowMs < exMs;
         });
-        const mapped = filtered.map((n) => ({
-          id: String(n.id || ''),
-          title: String(n.title || ''),
-          message: String(n.message || ''),
-          time: typeof n.createdAt === 'string' ? n.createdAt : new Date().toISOString(),
-          type: (n.type as any) || 'info',
-          _isRead: !!(n as any).isRead,
-          linkText: (n as any).linkText,
-          linkUrl: (n as any).linkUrl,
-        }));
+        const mapped: Notification[] = filtered.map((n) => {
+          const createdRaw = (n as { createdAt?: unknown }).createdAt;
+          const created =
+            createdRaw instanceof Timestamp
+              ? createdRaw.toDate().toISOString()
+              : typeof createdRaw === 'string'
+              ? createdRaw
+              : new Date().toISOString();
+          const typeRaw = (n as { type?: unknown }).type;
+          const typeVal =
+            typeRaw === 'success' || typeRaw === 'warning' || typeRaw === 'info' ? (typeRaw as 'success' | 'warning' | 'info') : 'info';
+          return {
+            id: String((n as { id?: unknown }).id || ''),
+            title: String((n as { title?: unknown }).title || ''),
+            message: String((n as { message?: unknown }).message || ''),
+            time: String(created),
+            type: typeVal,
+            _isRead: Boolean((n as { isRead?: unknown }).isRead),
+            linkText: (n as { linkText?: string }).linkText,
+            linkUrl: (n as { linkUrl?: string }).linkUrl,
+          };
+        });
         setPersonalList(mapped);
-        setNotificationCount(mapped.filter((n) => !(n as any)._isRead).length);
+        setNotificationCount(mapped.filter((n) => !n._isRead).length);
       } catch (e) {
-        console.error('Failed to load teacher notifications:', e);
+        try {
+          setPersonalList([]);
+          setNotificationCount(0);
+        } catch (err) { void err }
       }
     };
     loadNotifications();
@@ -652,78 +731,78 @@ export const TeacherDashboard = () => {
     const qBroadcast = query(collection(db, 'notifications'), where('userId', '==', BROADCAST_TEACHERS));
     const unsubPersonal = onSnapshot(qPersonal, (snap) => {
       try {
-        const list = snap.docs.map((d) => {
-          const data: any = d.data();
-          const created = data.createdAt?.toDate?.()?.toISOString?.() || data.createdAt || new Date().toISOString();
+        const list: Notification[] = snap.docs.map((d) => {
+          const data = d.data() as Record<string, unknown>;
+          const createdRaw = (data as { createdAt?: unknown }).createdAt;
+          const created = createdRaw instanceof Timestamp ? createdRaw.toDate().toISOString() : typeof createdRaw === 'string' ? createdRaw : new Date().toISOString();
+          const exRaw = (data as { expiresAt?: unknown }).expiresAt;
+          const exMs = exRaw instanceof Timestamp ? exRaw.toDate().getTime() : typeof exRaw === 'string' ? new Date(exRaw).getTime() : undefined;
+          const typeRaw = (data as { type?: unknown }).type;
+          const typeVal = typeRaw === 'success' || typeRaw === 'warning' || typeRaw === 'info' ? (typeRaw as 'success' | 'warning' | 'info') : 'info';
           return {
             id: d.id,
-            title: String(data.title || ''),
-            message: String(data.message || ''),
+            title: String((data as { title?: unknown }).title || ''),
+            message: String((data as { message?: unknown }).message || ''),
             time: String(created),
-            type: (data.type as any) || 'info',
-            _isRead: !!data.isRead,
-            _expiresMs: (() => {
-              try {
-                const ex = data.expiresAt;
-                const ms = ex?.toDate?.()?.getTime?.() || (typeof ex === 'string' ? new Date(ex).getTime() : undefined);
-                return typeof ms === 'number' ? ms : undefined;
-              } catch { return undefined; }
-            })(),
-            linkText: data.linkText,
-            linkUrl: data.linkUrl,
-          } as any;
+            type: typeVal,
+            _isRead: Boolean((data as { isRead?: unknown }).isRead),
+            _expiresMs: typeof exMs === 'number' ? exMs : undefined,
+            linkText: (data as { linkText?: string }).linkText,
+            linkUrl: (data as { linkUrl?: string }).linkUrl,
+          };
         });
         const nowMs = Date.now();
-        const visible = list.filter((n: any) => !n._expiresMs || nowMs < n._expiresMs);
-        visible.sort((a: any, b: any) => new Date(b.time).getTime() - new Date(a.time).getTime());
+        const visible = list.filter((n) => !n._expiresMs || nowMs < n._expiresMs);
+        visible.sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
         setPersonalList(visible);
-        const unread = visible.filter((n: any) => !n._isRead).length;
+        const unread = visible.filter((n) => !n._isRead).length;
         setNotificationCount(unread);
       } catch (e) {
         console.error('Failed to parse live notifications:', e);
       }
     }, (err) => {
-      console.error('Notifications live subscription error:', err);
+      try {
+        setPersonalList([]);
+      } catch (e) { void e }
     });
     const unsubBroadcast = onSnapshot(qBroadcast, (snap) => {
       try {
-        const list = snap.docs.map((d) => {
-          const data: any = d.data();
-          const created = data.createdAt?.toDate?.()?.toISOString?.() || data.createdAt || new Date().toISOString();
+        const list: Notification[] = snap.docs.map((d) => {
+          const data = d.data() as Record<string, unknown>;
+          const createdRaw = (data as { createdAt?: unknown }).createdAt;
+          const created = createdRaw instanceof Timestamp ? createdRaw.toDate().toISOString() : typeof createdRaw === 'string' ? createdRaw : new Date().toISOString();
+          const exRaw = (data as { expiresAt?: unknown }).expiresAt;
+          const exMs = exRaw instanceof Timestamp ? exRaw.toDate().getTime() : typeof exRaw === 'string' ? new Date(exRaw).getTime() : undefined;
+          const typeRaw = (data as { type?: unknown }).type;
+          const typeVal = typeRaw === 'success' || typeRaw === 'warning' || typeRaw === 'info' ? (typeRaw as 'success' | 'warning' | 'info') : 'info';
           return {
             id: d.id,
-            title: String(data.title || ''),
-            message: String(data.message || ''),
+            title: String((data as { title?: unknown }).title || ''),
+            message: String((data as { message?: unknown }).message || ''),
             time: String(created),
-            type: (data.type as any) || 'info',
-            _isRead: !!data.isRead,
-            _expiresMs: (() => {
-              try {
-                const ex = data.expiresAt;
-                const ms = ex?.toDate?.()?.getTime?.() || (typeof ex === 'string' ? new Date(ex).getTime() : undefined);
-                return typeof ms === 'number' ? ms : undefined;
-              } catch { return undefined; }
-            })(),
-            linkText: data.linkText,
-            linkUrl: data.linkUrl,
-          } as any;
+            type: typeVal,
+            _isRead: Boolean((data as { isRead?: unknown }).isRead),
+            _expiresMs: typeof exMs === 'number' ? exMs : undefined,
+            linkText: (data as { linkText?: string }).linkText,
+            linkUrl: (data as { linkUrl?: string }).linkUrl,
+          };
         });
         const nowMs = Date.now();
-        const visible = list.filter((n: any) => !n._expiresMs || nowMs < n._expiresMs);
-        visible.sort((a: any, b: any) => new Date(b.time).getTime() - new Date(a.time).getTime());
+        const visible = list.filter((n) => !n._expiresMs || nowMs < n._expiresMs);
+        visible.sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
         setBroadcastList(visible);
       } catch (e) {
         console.error('Failed to parse broadcast notifications:', e);
       }
-    }, (err) => console.error('Broadcast notifications subscription error:', err));
-    return () => { try { unsubPersonal(); unsubBroadcast(); } catch {} };
+    }, (err) => { try { setBroadcastList([]); } catch (e) { void e } });
+    return () => { try { unsubPersonal(); unsubBroadcast(); } catch (e) { void e } };
   }, [user?.uid]);
 
   useEffect(() => {
     const combine = () => {
-      const merged = [
-        ...personalList.map((n: any) => ({ id: n.id, title: n.title, message: n.message, time: n.time, type: n.type, linkText: n.linkText, linkUrl: n.linkUrl })),
-        ...broadcastList.map((n: any) => ({ id: n.id, title: n.title, message: n.message, time: n.time, type: n.type, linkText: n.linkText, linkUrl: n.linkUrl }))
+      const merged: Notification[] = [
+        ...personalList.map((n) => ({ id: n.id, title: n.title, message: n.message, time: n.time, type: n.type, linkText: n.linkText, linkUrl: n.linkUrl })),
+        ...broadcastList.map((n) => ({ id: n.id, title: n.title, message: n.message, time: n.time, type: n.type, linkText: n.linkText, linkUrl: n.linkUrl }))
       ];
       const seen = new Set<string>();
       const uniq = merged.filter((x) => {
@@ -745,7 +824,7 @@ export const TeacherDashboard = () => {
           didInitRef.current = true;
         }
         prevIdsRef.current = incoming;
-      } catch {}
+      } catch (e) { void e }
     };
     combine();
   }, [personalList, broadcastList]);
@@ -1298,50 +1377,81 @@ export const TeacherDashboard = () => {
 
   return (
     <div className="min-h-screen bg-gray-50 pt-16" dir={language === 'ar' ? 'rtl' : 'ltr'}>
-      <Dialog open={showWelcomeTrial} onOpenChange={setShowWelcomeTrial}>
-        <DialogContent className="sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle className="text-[#2c4656]">
-              {language === 'ar' ? 'بدأت نسختك التجريبية الآن' : 'Your trial starts now'}
-            </DialogTitle>
-            <DialogDescription>
-              {language === 'ar'
-                ? 'مرحبًا بك! يمكنك تجربة الميزات الممتازة لدينا لتحديد الباقة الأنسب لك. تشمل ميزاتك:'
-                : 'Welcome! Try our premium features to determine the best plan for you. Your features include:'}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4" dir={language === 'ar' ? 'rtl' : 'ltr'}>
-            {[
-              { ar: 'لوحة التحكم والإحصائيات السريعة', en: 'Dashboard & quick stats' },
-              { ar: 'إدارة الدورات الحالية', en: 'Manage existing courses' },
-              { ar: 'إضافة درس داخل الدورات', en: 'Add lessons to courses' },
-              { ar: 'الامتحانات والواجبات', en: 'Exams & assignments' },
-              { ar: 'دعوة الطلاب وتخصيص المنصة', en: 'Invite students & customize platform' },
-              { ar: 'الأرباح والمدفوعات', en: 'Earnings & payouts' },
-            ].map((item, idx) => (
-              <div key={idx} className={`flex items-center justify-between border rounded-lg p-3 ${language === 'ar' ? 'flex-row-reverse text-right' : ''}`}>
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-full bg-[#ee7b3d]/10 flex items-center justify-center">
-                    <Check className="h-5 w-5 text-[#ee7b3d]" />
-                  </div>
-                  <span className="text-sm text-gray-900">
-                    {language === 'ar' ? item.ar : item.en}
-                  </span>
-                </div>
-                <div className="w-5 h-5 rounded-full bg-[#ee7b3d] text-white flex items-center justify-center">
-                  <Check className="h-3 w-3" />
+      <Dialog open={showWelcomeTrial} onOpenChange={(open) => {
+        setShowWelcomeTrial(open);
+        try {
+          if (!open && (effectiveTeacherId || user?.uid)) {
+            const tid = effectiveTeacherId || user?.uid || '';
+            TeacherService.updateTeacherProfile(tid, { hasSeenTrialWelcome: true }).catch(() => {});
+          }
+        } catch {}
+      }}>
+        <DialogContent
+          className="sm:max-w-2xl w-[95vw] max-w-[95vw] h-[85vh] p-0 overflow-hidden"
+          onInteractOutside={(e) => e.preventDefault()}
+          onEscapeKeyDown={(e) => e.preventDefault()}
+        >
+          <div className="h-full flex flex-col">
+            <div className="h-1/2">
+              <img
+                src="/بانر%20نافذة%20الترحيب.png"
+                alt={language === 'ar' ? 'بانر نافذة الترحيب' : 'Welcome dialog banner'}
+                className="w-full h-full object-cover block"
+              />
+            </div>
+            <div className="flex-1 flex flex-col">
+              <div className="px-6 pt-4 flex-1 overflow-y-auto">
+                <DialogHeader className="text-center">
+                  <DialogTitle className="text-[#2c4656] text-center">
+                    {language === 'ar' ? 'بدأت نسختك التجريبية الآن' : 'Your trial starts now'}
+                    {trialSettings ? (
+                      <span className="ml-2 text-sm text-muted-foreground">
+                        {language === 'ar'
+                          ? `${trialSettings.value} ${trialSettings.unit === 'days' ? 'أيام' : 'دقائق'}`
+                          : `${trialSettings.value} ${trialSettings.unit === 'days' ? 'days' : 'minutes'}`}
+                      </span>
+                    ) : null}
+                  </DialogTitle>
+                  <DialogDescription className="text-center">
+                    {language === 'ar'
+                      ? 'مرحبًا بك! يمكنك تجربة الميزات الممتازة لدينا لتحديد الباقة الأنسب لك. تشمل ميزاتك:'
+                      : 'Welcome! Try our premium features to determine the best plan for you. Your features include:'}
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4" dir={language === 'ar' ? 'rtl' : 'ltr'}>
+                  {[
+                    { ar: 'لوحة التحكم والإحصائيات السريعة', en: 'Dashboard & quick stats' },
+                    { ar: 'إدارة الدورات الحالية', en: 'Manage existing courses' },
+                    { ar: 'إضافة كورس جديد', en: 'Add New Course' },
+                    { ar: 'الامتحانات والواجبات', en: 'Exams & assignments' },
+                    { ar: 'دعوة الطلاب وتخصيص المنصة', en: 'Invite students & customize platform' },
+                    { ar: 'الأرباح والمدفوعات', en: 'Earnings & payouts' },
+                  ].map((item, idx) => (
+                    <div key={idx} className={`flex items-center justify-between border rounded-lg p-3 ${language === 'ar' ? 'flex-row-reverse text-right' : ''}`}>
+                      <span className="text-sm text-gray-900">
+                        {language === 'ar' ? item.ar : item.en}
+                      </span>
+                      <Check className="h-5 w-5 text-[#ee7b3d]" />
+                    </div>
+                  ))}
                 </div>
               </div>
-            ))}
+              <DialogFooter className="px-6 pb-6">
+                <Button onClick={() => {
+                  try {
+                    const tid = effectiveTeacherId || user?.uid || '';
+                    if (tid) TeacherService.updateTeacherProfile(tid, { hasSeenTrialWelcome: true }).catch(() => {});
+                  } catch {}
+                  setShowWelcomeTrial(false);
+                }} className="bg-[#ee7b3d] hover:bg-[#ee7b3d]/90 text-white">
+                  {language === 'ar' ? 'لنبدأ' : "Let's go"}
+                </Button>
+              </DialogFooter>
+            </div>
           </div>
-          <DialogFooter>
-            <Button onClick={() => setShowWelcomeTrial(false)} className="bg-[#ee7b3d] hover:bg-[#ee7b3d]/90 text-white">
-              {language === 'ar' ? 'لنبدأ' : "Let's go"}
-            </Button>
-          </DialogFooter>
         </DialogContent>
       </Dialog>
-      <DashboardHeader fixed studentName={displayTeacherName} notificationCount={notificationCount} notifications={notifications} newNotificationPreview={newNotifPreview} onPreviewClear={() => setNewNotifPreview(null)} onNotificationsOpen={async () => {
+      <DashboardHeader fixed studentName={displayTeacherName} notificationCount={notificationCount} notifications={notifications} newNotificationPreview={newNotifPreview} onPreviewClear={() => setNewNotifPreview(null)} defaultOpenNotifications={showWelcomeTrial} onNotificationsOpen={async () => {
         try {
           const uid = user?.uid || (user as any)?.id;
           if (uid) await NotificationService.markAllAsRead(uid);

@@ -48,6 +48,7 @@ import {
 import { toast } from 'sonner';
 import { auth, db } from '@/firebase/config';
 import { StorageService } from '@/services/storageService';
+import { NotificationService } from '@/services/notificationService';
 import { doc, onSnapshot, setDoc, serverTimestamp, collection, query, orderBy, updateDoc, getDoc, where, getDocs } from 'firebase/firestore';
 import { TeacherService } from '@/services/teacherService';
 
@@ -314,6 +315,19 @@ const PaymentsPayouts: React.FC = () => {
           });
         }
       } catch {}
+      try {
+        if (teacherId) {
+          await NotificationService.createNotification({
+            userId: teacherId,
+            title: language === 'ar' ? 'تمت الموافقة على اشتراكك' : 'Your subscription was approved',
+            message: language === 'ar' ? `تمت الموافقة على اشتراكك في باقة ${planName || ''}.` : `Your subscription to plan ${planName || ''} has been approved.`,
+            type: 'success',
+            origin: 'admin',
+            linkText: language === 'ar' ? 'فتح' : 'Open',
+            linkUrl: '/teacher-dashboard'
+          } as any);
+        }
+      } catch {}
       toast.success(language === 'ar' ? 'تم قبول الدفع وتم تحديد انتهاء الاشتراك.' : 'Payment approved and subscription expiry set.');
     } catch (e) {
       console.error('Failed to approve payment:', e);
@@ -323,11 +337,27 @@ const PaymentsPayouts: React.FC = () => {
 
   const handleRejectPayment = async (paymentId: string) => {
     try {
-      await updateDoc(doc(db, 'payments', paymentId), {
+      const pRef = doc(db, 'payments', paymentId);
+      const pSnap = await getDoc(pRef);
+      const pdata: any = pSnap.exists() ? pSnap.data() : {};
+      const teacherId: string | undefined = typeof pdata?.teacherId === 'string' ? pdata.teacherId : undefined;
+      const planName: string | undefined = typeof pdata?.planName === 'string' ? pdata.planName : undefined;
+      await updateDoc(pRef, {
         status: 'rejected',
         rejectedAt: serverTimestamp(),
         rejectedBy: auth.currentUser?.uid || null,
       });
+      try {
+        if (teacherId) {
+          await NotificationService.createNotification({
+            userId: teacherId,
+            title: language === 'ar' ? 'تم رفض الاشتراك' : 'Subscription rejected',
+            message: language === 'ar' ? `تم رفض اشتراكك في الباقة ${planName || ''}.` : `Your subscription to plan ${planName || ''} was rejected.`,
+            type: 'error',
+            origin: 'admin',
+          } as any);
+        }
+      } catch {}
       toast.success(language === 'ar' ? 'تم رفض الدفع.' : 'Payment rejected.');
     } catch (e) {
       console.error('Failed to reject payment:', e);
@@ -353,6 +383,17 @@ const PaymentsPayouts: React.FC = () => {
       const nextExtra = currentExtra + addonGB;
       await updateDoc(tRef, { extraStorageGB: nextExtra, storageOver80Pct: false, storageOver95Pct: false, updatedAt: new Date().toISOString() });
       await updateDoc(pRef, { status: 'approved', approvedAt: serverTimestamp(), approvedBy: auth.currentUser?.uid || null, approvedAddonGB: addonGB });
+      try {
+        if (teacherId) {
+          await NotificationService.createNotification({
+            userId: teacherId,
+            title: language === 'ar' ? 'تمت الموافقة على المساحة الإضافية' : 'Storage add-on approved',
+            message: language === 'ar' ? `تمت الموافقة على شراء ${addonGB}GB مساحة إضافية.` : `Your purchase of ${addonGB}GB additional storage was approved.`,
+            type: 'success',
+            origin: 'admin',
+          } as any);
+        }
+      } catch {}
       toast.success(language === 'ar' ? 'تمت الموافقة على المساحة الإضافية وزيادتها للمدرس.' : 'Storage add-on approved and applied to teacher.');
     } catch (e) {
       console.error('Approve storage add-on failed:', e);
@@ -362,7 +403,23 @@ const PaymentsPayouts: React.FC = () => {
 
   const handleRejectStorageAddon = async (paymentId: string) => {
     try {
-      await updateDoc(doc(db, 'payments', paymentId), { status: 'rejected', rejectedAt: serverTimestamp(), rejectedBy: auth.currentUser?.uid || null });
+      const pRef = doc(db, 'payments', paymentId);
+      const pSnap = await getDoc(pRef);
+      const pdata: any = pSnap.exists() ? pSnap.data() : {};
+      const teacherId: string | undefined = pdata?.teacherId;
+      const addonGB: number = typeof pdata?.addonGB === 'number' ? pdata.addonGB : 0;
+      await updateDoc(pRef, { status: 'rejected', rejectedAt: serverTimestamp(), rejectedBy: auth.currentUser?.uid || null });
+      try {
+        if (teacherId) {
+          await NotificationService.createNotification({
+            userId: teacherId,
+            title: language === 'ar' ? 'تم رفض طلب المساحة الإضافية' : 'Storage add-on rejected',
+            message: language === 'ar' ? `تم رفض طلب شراء ${addonGB}GB مساحة إضافية.` : `Your request to buy ${addonGB}GB additional storage was rejected.`,
+            type: 'error',
+            origin: 'admin',
+          } as any);
+        }
+      } catch {}
       toast.success(language === 'ar' ? 'تم رفض طلب المساحة الإضافية.' : 'Storage add-on request rejected.');
     } catch (e) {
       console.error('Reject storage add-on failed:', e);

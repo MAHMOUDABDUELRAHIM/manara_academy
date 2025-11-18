@@ -16,6 +16,7 @@ interface StudentDashboardPreviewProps {
   logo?: string;
   brandLogoScale?: number;
   brandNameScale?: number;
+  interactive?: boolean;
 }
 
 export const StudentDashboardPreview: React.FC<StudentDashboardPreviewProps> = ({
@@ -23,7 +24,8 @@ export const StudentDashboardPreview: React.FC<StudentDashboardPreviewProps> = (
   accentColor = '#3B82F6',
   logo,
   brandLogoScale = 1,
-  brandNameScale = 1
+  brandNameScale = 1,
+  interactive = false
 }) => {
   const { language } = useLanguage();
   
@@ -81,8 +83,9 @@ export const StudentDashboardPreview: React.FC<StudentDashboardPreviewProps> = (
       dir={language === 'ar' ? 'rtl' : 'ltr'}
       style={{ fontSize: '10px' }}
     >
-      {/* Overlay to prevent interactions */}
-      <div className="absolute inset-0 z-50 bg-transparent cursor-default" />
+      {!interactive && (
+        <div className="absolute inset-0 z-50 bg-transparent cursor-default" />
+      )}
       
       {/* Header */}
       <div 

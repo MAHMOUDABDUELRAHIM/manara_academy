@@ -268,6 +268,12 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, requiredRole,
   }
 
   if (requiredRole && user.role !== requiredRole) {
+    // Allow teacher to preview student routes when studentPreview flag is set
+    let studentPreview = false;
+    try { studentPreview = localStorage.getItem('studentPreview') === 'true'; } catch {}
+    if (requiredRole === 'student' && studentPreview) {
+      return <>{children}</>;
+    }
     // Honor pending role hint ONLY for teacher dashboard pages to avoid student bypass
     let pendingRole: string | null = null;
     try { pendingRole = localStorage.getItem('pendingRole'); } catch {}

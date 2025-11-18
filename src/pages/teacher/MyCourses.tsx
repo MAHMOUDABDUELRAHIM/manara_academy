@@ -562,7 +562,7 @@ const teacherName = user?.displayName || (language === 'ar' ? 'مدرس جديد
                         className="flex-1 border-[#ee7b3d] text-[#ee7b3d] hover:bg-[#ee7b3d] hover:text-white"
                       >
                         <Plus className="h-4 w-4 mr-2" />
-                        {language === 'ar' ? 'إضافة درس' : 'Add Lesson'}
+                        {language === 'ar' ? 'إضافة درس جديد' : 'Add New Lesson'}
                       </Button>
                     </Link>
 

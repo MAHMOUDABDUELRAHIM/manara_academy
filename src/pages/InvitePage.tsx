@@ -141,6 +141,19 @@ useEffect(() => {
   }, [])
 
   useEffect(() => {
+    try {
+      const params = new URLSearchParams(location.search)
+      const inc = params.get('incognito')
+      const teacherPreview = params.get('teacherPreview') === '1'
+      if (inc === '1' && !teacherPreview) {
+        try { localStorage.clear() } catch {}
+        try { sessionStorage.clear() } catch {}
+        try { signOut(auth) } catch {}
+      }
+    } catch {}
+  }, [])
+
+  useEffect(() => {
     const fetchTeacher = async () => {
       if (!teacherId) {
         navigate('/')
@@ -552,11 +565,17 @@ useEffect(() => {
 
   const handleSignOutClick = async () => {
     try {
+      const params = new URLSearchParams(location.search)
+      const teacherPreview = params.get('teacherPreview') === '1'
+      const previewLS = (() => { try { return localStorage.getItem('studentPreview') === 'true' } catch { return false } })()
+      if (teacherPreview || previewLS) {
+        toast.info(language === 'ar' ? 'أنت في وضع معاينة المدرس؛ لن يتم تسجيل الخروج' : 'Teacher preview mode; sign out is disabled')
+        return
+      }
       setSigningOut(true)
       await new Promise((res) => setTimeout(res, 1500))
       await signOut(auth)
       toast.success(language === 'ar' ? 'تم تسجيل الخروج بنجاح' : 'Signed out successfully')
-      // لا يتم التوجيه بعد تسجيل الخروج؛ يبقى المستخدم في نفس الصفحة
     } catch (err) {
       console.error('Sign out error:', err)
       toast.error(language === 'ar' ? 'حدث خطأ أثناء تسجيل الخروج' : 'Error during sign out')

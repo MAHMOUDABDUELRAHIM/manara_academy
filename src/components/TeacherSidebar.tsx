@@ -3,6 +3,7 @@ import { Link, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { useAuth } from "@/hooks/useAuth";
 import { 
   Home, 
   BookOpen, 
@@ -16,7 +17,8 @@ import {
   Settings,
   UserPlus,
   CheckSquare,
-  Lock
+  Lock,
+  ExternalLink
 } from "lucide-react";
 
 interface SidebarItem {
@@ -143,6 +145,8 @@ export const TeacherSidebar = ({ className, isSubscriptionApproved = false }: Te
   const toggleMobile = () => {
     setIsMobileOpen(!isMobileOpen);
   };
+  const { user } = useAuth();
+  const studentPlatformHref = user?.uid ? `/invite/${user.uid}` : '/invite/teacher-id';
 
   return (
     <>
@@ -199,6 +203,26 @@ export const TeacherSidebar = ({ className, isSubscriptionApproved = false }: Te
 
         <nav className="flex-1 p-4 overflow-y-auto min-h-0 bg-[#1d1442] text-gray-200">
           <div className="space-y-6">
+            <ul className="space-y-2">
+              <li>
+                <Link
+                  to={user?.uid ? `/invite/${user.uid}?teacherPreview=1` : '/invite/teacher-id?teacherPreview=1'}
+                  onClick={() => { try { localStorage.setItem('studentPreview','true'); } catch {}; try { setIsMobileOpen(false); } catch {} }}
+                  className={cn(
+                    "w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-md transition-colors",
+                    "hover:bg-[#2a1f62] hover:text-white",
+                    isCollapsed && "justify-center px-2"
+                  )}
+                >
+                  <ExternalLink className="h-5 w-5 flex-shrink-0" />
+                  {!isCollapsed && (
+                    <span className="text-sm font-medium truncate">
+                      {language === 'ar' ? 'منصة الطالب' : 'Student Platform'}
+                    </span>
+                  )}
+                </Link>
+              </li>
+            </ul>
             <div>
               {!isCollapsed && (
                 <div className="px-3 pb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">

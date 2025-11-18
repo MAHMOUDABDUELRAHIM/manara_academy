@@ -28,6 +28,7 @@ import { AddLesson } from "./pages/teacher/AddLesson";
 import TeacherAssessments from "./pages/teacher/Assessments";
 import TeacherSettings from "./pages/teacher/Settings";
 import StorageAddon from "./pages/teacher/StorageAddon";
+import StudentPreview from "./pages/teacher/StudentPreview";
 
 import ManageUsers from "./pages/admin/ManageUsers";
 import ManageCourses from "./pages/admin/ManageCourses";
@@ -130,6 +131,11 @@ import ErrorBoundary from "@/components/ErrorBoundary";
               <Route path="/teacher-dashboard/assessments" element={
                 <ProtectedRoute requiredRole="teacher">
                   <TeacherAssessments />
+                </ProtectedRoute>
+              } />
+              <Route path="/teacher-dashboard/student-platform" element={
+                <ProtectedRoute requiredRole="teacher">
+                  <StudentPreview />
                 </ProtectedRoute>
               } />
               <Route path="/teacher-dashboard/settings" element={

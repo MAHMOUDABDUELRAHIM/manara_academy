@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useAuthContext } from "@/contexts/AuthContext";
 import DashboardHeader from "@/components/DashboardHeader";
@@ -26,6 +27,11 @@ export const TeacherPayouts = () => {
   const [requests, setRequests] = useState<SubscriptionRequest[]>([]);
   const [loadingRequests, setLoadingRequests] = useState<boolean>(true);
   const [errorRequests, setErrorRequests] = useState<string | null>(null);
+  const [showScreenshot, setShowScreenshot] = useState<boolean>(false);
+  const [activeScreenshot, setActiveScreenshot] = useState<string | null>(null);
+
+  const pendingRequests = requests.filter(r => r.status === 'pending');
+  const approvedRequests = requests.filter(r => r.status === 'confirmed');
 
   useEffect(() => {
     const init = async () => {
@@ -89,14 +95,14 @@ export const TeacherPayouts = () => {
   };
 
   return (
-    <div className="min-h-screen bg-[#f2f2f2]" dir={language === 'ar' ? 'rtl' : 'ltr'}>
-      <DashboardHeader studentName={teacherName} />
+    <div className="min-h-screen bg-gray-50 pt-16" dir={language === 'ar' ? 'rtl' : 'ltr'}>
+      <DashboardHeader fixed studentName={teacherName} />
       
       <div className="flex min-h-[calc(100vh-4rem)]">
         <TeacherSidebar />
         
         {/* Main Content */}
-        <main className="flex-1 p-6 overflow-auto bg-[#f2f2f2]">
+        <main className="md:ml-64 flex-1 p-6 overflow-y-auto">
           {/* Header Section */}
           <div className="mb-8">
             <h1 className="text-3xl font-bold text-[#2c4656] mb-2">
@@ -110,7 +116,7 @@ export const TeacherPayouts = () => {
           </div>
 
           {/* Wallet Number Section */}
-          <Card className="bg-white border-0 shadow-sm mb-8">
+          <Card className="bg-white border border-gray-200 shadow-sm rounded-xl mb-8">
             <CardHeader>
               <CardTitle className="text-[#2c4656]">
                 {language === 'ar' ? 'رقم المحفظة لاستقبال اشتراكات الطلاب' : 'Wallet Number for Student Subscriptions'}
@@ -135,7 +141,7 @@ export const TeacherPayouts = () => {
           </Card>
 
           {/* Student Requests Section */}
-          <Card className="bg-white border-0 shadow-sm">
+          <Card className="bg-white border border-gray-200 shadow-sm rounded-xl">
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-[#2c4656]">
                 <ImageIcon className="h-5 w-5" />
@@ -147,46 +153,56 @@ export const TeacherPayouts = () => {
                 <p className="text-gray-500">{language === 'ar' ? 'جاري التحميل...' : 'Loading...'}</p>
               ) : errorRequests ? (
                 <p className="text-red-600">{errorRequests}</p>
-              ) : requests.length === 0 ? (
+              ) : pendingRequests.length === 0 ? (
                 <div className="text-center py-8">
                   <p className="text-gray-500">
                     {language === 'ar' ? 'لا توجد طلبات اشتراك حالياً' : 'No subscription requests yet'}
                   </p>
                 </div>
               ) : (
-                <div className="space-y-4">
-                  {requests.map((req) => (
-                    <div key={req.id} className="flex flex-col md:flex-row gap-4 p-4 border border-gray-200 rounded-lg">
-                      <div className="md:w-2/3 space-y-1">
-                        <p className="text-sm text-gray-700">
-                          <span className="font-medium">{language === 'ar' ? 'الطالب:' : 'Student:'}</span> {req.studentName || req.studentId}
-                        </p>
-                        <p className="text-sm text-gray-700">
-                          <span className="font-medium">{language === 'ar' ? 'الدورة:' : 'Course:'}</span> {req.courseTitle || req.courseId}
-                        </p>
+                <div className="space-y-3">
+                  <div className="hidden md:grid grid-cols-6 gap-3 p-3 bg-gray-50 border border-gray-200 rounded-lg text-sm font-medium text-gray-700">
+                    <div>{language === 'ar' ? 'الطالب' : 'Student'}</div>
+                    <div>{language === 'ar' ? 'الدورة' : 'Course'}</div>
+                    <div>{language === 'ar' ? 'المبلغ' : 'Amount'}</div>
+                    <div>{language === 'ar' ? 'الحالة' : 'Status'}</div>
+                    <div>{language === 'ar' ? 'الصورة' : 'Screenshot'}</div>
+                    <div className={language === 'ar' ? 'text-right' : 'text-left'}>{language === 'ar' ? 'إجراءات' : 'Actions'}</div>
+                  </div>
+                  {pendingRequests.map((req) => (
+                    <div key={req.id} className="grid grid-cols-1 md:grid-cols-6 gap-3 p-3 border border-gray-200 rounded-lg items-center">
+                      <div className="text-sm text-gray-700">
+                        {req.studentName || req.studentId}
+                      </div>
+                      <div className="text-sm text-gray-700">
+                        {req.courseTitle || req.courseId}
+                      </div>
+                      <div className="text-sm text-gray-700">
+                        {req.amount ?? '-'}
+                      </div>
+                      <div>
                         <Badge variant="outline" className="capitalize w-fit">
                           {language === 'ar' ? (req.status === 'pending' ? 'معلق' : req.status === 'confirmed' ? 'تم التأكيد' : 'مرفوض') : req.status}
                         </Badge>
-                        {req.amount && (
-                          <p className="text-sm text-gray-700">{language === 'ar' ? 'المبلغ:' : 'Amount:'} {req.amount}</p>
-                        )}
                       </div>
-                      <div className="md:w-1/3">
+                      <div>
                         {req.screenshotUrl ? (
-                          <a href={req.screenshotUrl} target="_blank" rel="noopener noreferrer">
-                            <img src={req.screenshotUrl} alt="Payment screenshot" className="w-full h-40 object-cover rounded-md border" />
-                          </a>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="border-[#ee7b3d] text-[#ee7b3d] hover:bg-[#ee7b3d]/10"
+                            onClick={() => { setActiveScreenshot(req.screenshotUrl!); setShowScreenshot(true); }}
+                          >
+                            {language === 'ar' ? 'عرض الصورة' : 'View Screenshot'}
+                          </Button>
                         ) : (
-                          <div className="w-full h-40 bg-gray-100 rounded-md flex items-center justify-center text-gray-500">
-                            {language === 'ar' ? 'لا توجد صورة' : 'No image'}
-                          </div>
+                          <span className="text-sm text-gray-500">{language === 'ar' ? 'لا توجد صورة' : 'No image'}</span>
                         )}
                       </div>
-
-                      <div className="flex items-center gap-2 md:w-full">
+                      <div className={`flex items-center gap-2 ${language === 'ar' ? 'justify-end' : 'justify-start'}`}>
                         <Button 
                           disabled={req.status !== 'pending'} 
-                          className="bg-green-600 hover:bg-green-700 text-white"
+                          className="bg-[#ee7b3d] hover:bg-[#ee7b3d]/90 text-white"
                           onClick={() => handleConfirm(req.id!)}
                         >
                           {language === 'ar' ? 'تأكيد الدفع وفتح الكورس' : 'Confirm & Grant Access'}
@@ -206,6 +222,84 @@ export const TeacherPayouts = () => {
               )}
             </CardContent>
           </Card>
+
+          {/* Approved Requests Section */}
+          <Card className="bg-white border border-gray-200 shadow-sm rounded-xl mt-6">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-[#2c4656]">
+                <ImageIcon className="h-5 w-5" />
+                {language === 'ar' ? 'الطلبات الموافق عليها' : 'Approved Requests'}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {loadingRequests ? (
+                <p className="text-gray-500">{language === 'ar' ? 'جاري التحميل...' : 'Loading...'}</p>
+              ) : approvedRequests.length === 0 ? (
+                <div className="text-center py-8">
+                  <p className="text-gray-500">
+                    {language === 'ar' ? 'لا توجد طلبات مؤكدة حالياً' : 'No approved requests yet'}
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div className="hidden md:grid grid-cols-5 gap-3 p-3 bg-gray-50 border border-gray-200 rounded-lg text-sm font-medium text-gray-700">
+                    <div>{language === 'ar' ? 'الطالب' : 'Student'}</div>
+                    <div>{language === 'ar' ? 'الدورة' : 'Course'}</div>
+                    <div>{language === 'ar' ? 'المبلغ' : 'Amount'}</div>
+                    <div>{language === 'ar' ? 'الصورة' : 'Screenshot'}</div>
+                    <div>{language === 'ar' ? 'تمت في' : 'Processed At'}</div>
+                  </div>
+                  {approvedRequests.map((req) => (
+                    <div key={req.id} className="grid grid-cols-1 md:grid-cols-5 gap-3 p-3 border border-gray-200 rounded-lg items-center">
+                      <div className="text-sm text-gray-700">{req.studentName || req.studentId}</div>
+                      <div className="text-sm text-gray-700">{req.courseTitle || req.courseId}</div>
+                      <div className="text-sm text-gray-700">{req.amount ?? '-'}</div>
+                      <div>
+                        {req.screenshotUrl ? (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="border-[#ee7b3d] text-[#ee7b3d] hover:bg-[#ee7b3d]/10"
+                            onClick={() => { setActiveScreenshot(req.screenshotUrl!); setShowScreenshot(true); }}
+                          >
+                            {language === 'ar' ? 'عرض الصورة' : 'View Screenshot'}
+                          </Button>
+                        ) : (
+                          <span className="text-sm text-gray-500">{language === 'ar' ? 'لا توجد صورة' : 'No image'}</span>
+                        )}
+                      </div>
+                      <div className="text-sm text-gray-700">{req.processedAt ? new Date(req.processedAt).toLocaleString() : '-'}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Dialog open={showScreenshot} onOpenChange={setShowScreenshot}>
+            <DialogContent className="sm:max-w-3xl">
+              <DialogHeader>
+                <DialogTitle className="text-center">{language === 'ar' ? 'لقطة الدفع' : 'Payment Screenshot'}</DialogTitle>
+              </DialogHeader>
+              <div className="flex items-center justify-center">
+                {activeScreenshot && (
+                  <img src={activeScreenshot} alt="Payment screenshot" className="max-h-[70vh] rounded-lg border" />
+                )}
+              </div>
+            </DialogContent>
+          </Dialog>
+          <Dialog open={showScreenshot} onOpenChange={setShowScreenshot}>
+            <DialogContent className="sm:max-w-3xl">
+              <DialogHeader>
+                <DialogTitle className="text-center">{language === 'ar' ? 'لقطة الدفع' : 'Payment Screenshot'}</DialogTitle>
+              </DialogHeader>
+              <div className="flex items-center justify-center">
+                {activeScreenshot && (
+                  <img src={activeScreenshot} alt="Payment screenshot" className="max-h-[70vh] rounded-lg border" />
+                )}
+              </div>
+            </DialogContent>
+          </Dialog>
         </main>
       </div>
 

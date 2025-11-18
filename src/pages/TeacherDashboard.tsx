@@ -21,6 +21,7 @@ import { NotificationService } from "@/services/notificationService";
 const BROADCAST_TEACHERS = "__ALL_TEACHERS__";
 import { TeacherService } from "@/services/teacherService";
 import { StudentService, StudentProfile } from "@/services/studentService";
+import AssignmentService from "@/services/assignmentService";
 import { 
   BookOpen, 
   Users, 
@@ -38,7 +39,19 @@ import {
   Copy,
   RefreshCw
 } from "lucide-react";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Check, UploadCloud } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
+import { 
+  AlertDialog, 
+  AlertDialogContent, 
+  AlertDialogHeader, 
+  AlertDialogTitle, 
+  AlertDialogDescription as AlertDialogDesc, 
+  AlertDialogFooter, 
+  AlertDialogAction, 
+  AlertDialogCancel 
+} from '@/components/ui/alert-dialog';
 
 interface Course {
   id: string;
@@ -69,6 +82,7 @@ export const TeacherDashboard = () => {
   const { language, t } = useLanguage();
   const { user } = useAuth();
   const isArabic = language === 'ar';
+  const [showWelcomeTrial, setShowWelcomeTrial] = useState<boolean>(false);
   
   // Teacher Pricing Plans loaded from Firestore
   interface PricingPlanDoc {
@@ -116,6 +130,19 @@ export const TeacherDashboard = () => {
     window.addEventListener('hashchange', onHashChange);
     return () => window.removeEventListener('hashchange', onHashChange);
   }, []);
+
+  useEffect(() => {
+    try {
+      const isTeacher = user?.role === 'teacher';
+      if (!isTeacher) return;
+      const key = `teacherWelcomeShown:${user?.uid || 'unknown'}`;
+      const already = localStorage.getItem(key) === 'true';
+      if (!already) {
+        setShowWelcomeTrial(true);
+        localStorage.setItem(key, 'true');
+      }
+    } catch {}
+  }, [user?.uid, user?.role]);
 
   // Subscription section state
   const [selectedPlan, setSelectedPlan] = useState<PricingPlanDoc | null>(null);
@@ -726,7 +753,14 @@ export const TeacherDashboard = () => {
   
   const [linkedStudents, setLinkedStudents] = useState<any[]>([]);
   const [registeredStudents, setRegisteredStudents] = useState<StudentProfile[]>([]);
+  const [showStudentInfo, setShowStudentInfo] = useState<boolean>(false);
+  const [activeStudent, setActiveStudent] = useState<StudentProfile | null>(null);
+  const [deletingStudentId, setDeletingStudentId] = useState<string | null>(null);
+  const [suspendingId, setSuspendingId] = useState<string | null>(null);
   const [isLoadingStudents, setIsLoadingStudents] = useState(true);
+  const [studentCoursesForTeacher, setStudentCoursesForTeacher] = useState<Array<{ id: string; title: string }>>([]);
+  const [assignSummary, setAssignSummary] = useState<{ count: number; average: number } | null>(null);
+  const [examSummary, setExamSummary] = useState<{ count: number; average: number } | null>(null);
   // moved teacherProfile above to compute displayTeacherName
   // إدارة كود الدعوة المخصص
   const [invitationCode, setInvitationCode] = useState<string>('');
@@ -776,6 +810,54 @@ export const TeacherDashboard = () => {
     };
     resolveEffectiveTeacher();
   }, [user?.uid]);
+
+  useEffect(() => {
+    const loadStudentDetails = async () => {
+      if (!showStudentInfo || !activeStudent) {
+        setStudentCoursesForTeacher([]);
+        setAssignSummary(null);
+        setExamSummary(null);
+        return;
+      }
+      const teacherCourseIds = new Set((courses || []).map((c) => c.id));
+      const enrolledIds = (activeStudent.enrolledCourses || []).filter((id) => teacherCourseIds.has(id));
+      const titles = (courses || [])
+        .filter((c) => enrolledIds.includes(c.id))
+        .map((c) => ({ id: c.id, title: c.title }));
+      setStudentCoursesForTeacher(titles);
+
+      try {
+        const attempts = await AssignmentService.getAssignmentAttemptsForStudent(activeStudent.id);
+        const filtered = attempts.filter((a) => a.courseId && enrolledIds.includes(a.courseId as string));
+        const count = filtered.length;
+        let avg = 0;
+        if (count > 0) {
+          const percents = filtered.map((a) => {
+            const total = (a.totalPoints ?? a.total ?? 0) as number;
+            const earned = (a.earnedPoints ?? a.correct ?? 0) as number;
+            return total > 0 ? (earned / total) * 100 : 0;
+          });
+          avg = Math.round(percents.reduce((s, p) => s + p, 0) / count);
+        }
+        setAssignSummary({ count, average: avg });
+      } catch {}
+
+      try {
+        const examResultsObj = (activeStudent as any)?.examResults || {};
+        const results = Object.values(examResultsObj) as any[];
+        const graded = results.filter(
+          (r) => typeof r.total === "number" && typeof r.score === "number" && r.total > 0 && r.status === "graded"
+        );
+        const countE = graded.length;
+        let avgE = 0;
+        if (countE > 0) {
+          avgE = Math.round(graded.reduce((s, r) => s + (r.score / r.total) * 100, 0) / countE);
+        }
+        setExamSummary(countE > 0 ? { count: countE, average: avgE } : null);
+      } catch {}
+    };
+    loadStudentDetails();
+  }, [showStudentInfo, activeStudent, courses]);
 
   // الاستماع لوثائق المدفوعات لهذا المدرس لمزامنة حالات الاشتراك: pending/approved/rejected بشكل فوري ومستمر
   useEffect(() => {
@@ -1215,8 +1297,51 @@ export const TeacherDashboard = () => {
   );
 
   return (
-    <div className="min-h-screen bg-background" dir={language === 'ar' ? 'rtl' : 'ltr'}>
-      <DashboardHeader studentName={displayTeacherName} notificationCount={notificationCount} notifications={notifications} newNotificationPreview={newNotifPreview} onPreviewClear={() => setNewNotifPreview(null)} onNotificationsOpen={async () => {
+    <div className="min-h-screen bg-gray-50 pt-16" dir={language === 'ar' ? 'rtl' : 'ltr'}>
+      <Dialog open={showWelcomeTrial} onOpenChange={setShowWelcomeTrial}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-[#2c4656]">
+              {language === 'ar' ? 'بدأت نسختك التجريبية الآن' : 'Your trial starts now'}
+            </DialogTitle>
+            <DialogDescription>
+              {language === 'ar'
+                ? 'مرحبًا بك! يمكنك تجربة الميزات الممتازة لدينا لتحديد الباقة الأنسب لك. تشمل ميزاتك:'
+                : 'Welcome! Try our premium features to determine the best plan for you. Your features include:'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4" dir={language === 'ar' ? 'rtl' : 'ltr'}>
+            {[
+              { ar: 'لوحة التحكم والإحصائيات السريعة', en: 'Dashboard & quick stats' },
+              { ar: 'إدارة الدورات الحالية', en: 'Manage existing courses' },
+              { ar: 'إضافة درس داخل الدورات', en: 'Add lessons to courses' },
+              { ar: 'الامتحانات والواجبات', en: 'Exams & assignments' },
+              { ar: 'دعوة الطلاب وتخصيص المنصة', en: 'Invite students & customize platform' },
+              { ar: 'الأرباح والمدفوعات', en: 'Earnings & payouts' },
+            ].map((item, idx) => (
+              <div key={idx} className={`flex items-center justify-between border rounded-lg p-3 ${language === 'ar' ? 'flex-row-reverse text-right' : ''}`}>
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-full bg-[#ee7b3d]/10 flex items-center justify-center">
+                    <Check className="h-5 w-5 text-[#ee7b3d]" />
+                  </div>
+                  <span className="text-sm text-gray-900">
+                    {language === 'ar' ? item.ar : item.en}
+                  </span>
+                </div>
+                <div className="w-5 h-5 rounded-full bg-[#ee7b3d] text-white flex items-center justify-center">
+                  <Check className="h-3 w-3" />
+                </div>
+              </div>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button onClick={() => setShowWelcomeTrial(false)} className="bg-[#ee7b3d] hover:bg-[#ee7b3d]/90 text-white">
+              {language === 'ar' ? 'لنبدأ' : "Let's go"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <DashboardHeader fixed studentName={displayTeacherName} notificationCount={notificationCount} notifications={notifications} newNotificationPreview={newNotifPreview} onPreviewClear={() => setNewNotifPreview(null)} onNotificationsOpen={async () => {
         try {
           const uid = user?.uid || (user as any)?.id;
           if (uid) await NotificationService.markAllAsRead(uid);
@@ -1229,7 +1354,7 @@ export const TeacherDashboard = () => {
         <TeacherSidebar isSubscriptionApproved={isSubscriptionApproved} />
         
         {/* Main Content */}
-        <main className="flex-1 p-6 overflow-auto">
+        <main className={`md:ml-64 flex-1 p-6 overflow-y-auto`}>
           {/* Welcome Section (moved above pricing, centered) */}
           <div className="mb-8 text-center">
             <h1 className="text-3xl md:text-4xl font-bold text-foreground mb-2">
@@ -1259,13 +1384,13 @@ export const TeacherDashboard = () => {
 
           {/* Stats Cards */}
           {isSubscriptionApproved && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-            <Card>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <Card className="bg-white border border-gray-200 shadow-sm rounded-xl">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">
                   {language === 'ar' ? 'إجمالي الدورات' : 'Total Courses'}
                 </CardTitle>
-                <BookOpen className="h-4 w-4 text-muted-foreground" />
+                <BookOpen className="h-4 w-4 text-gray-400" />
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">{stats.totalCourses}</div>
@@ -1275,12 +1400,12 @@ export const TeacherDashboard = () => {
               </CardContent>
             </Card>
 
-            <Card>
+            <Card className="bg-white border border-gray-200 shadow-sm rounded-xl">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">
                   {language === 'ar' ? 'الطلاب المرتبطون' : 'Linked Students'}
                 </CardTitle>
-                <Users className="h-4 w-4 text-muted-foreground" />
+                <Users className="h-4 w-4 text-gray-400" />
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">{linkedStudents.length}</div>
@@ -1290,12 +1415,12 @@ export const TeacherDashboard = () => {
               </CardContent>
             </Card>
 
-            <Card>
+            <Card className="bg-white border border-gray-200 shadow-sm rounded-xl">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">
                   {language === 'ar' ? 'الطلاب المسجلون' : 'Registered Students'}
                 </CardTitle>
-                <GraduationCap className="h-4 w-4 text-muted-foreground" />
+                <GraduationCap className="h-4 w-4 text-gray-400" />
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">{registeredStudents.length}</div>
@@ -1310,10 +1435,10 @@ export const TeacherDashboard = () => {
           )}
 
           {/* Invitation Link Section (visible before subscription) */}
-          <Card className="mb-6">
+          <Card className="mb-6 bg-white border border-gray-200 shadow-sm rounded-xl">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <Users className="h-5 w-5 text-[#2c4656]" />
+                <Users className="h-5 w-5 text-gray-400" />
                 {language === 'ar' ? 'رابط دعوة الطلاب' : 'Student Invitation Link'}
               </CardTitle>
             </CardHeader>
@@ -1321,7 +1446,7 @@ export const TeacherDashboard = () => {
               <div className="space-y-4">
                 <div className="flex items-center gap-3 p-4 bg-gray-50 rounded-lg">
                   <div className="flex-1">
-                    <div className="text-sm font-mono text-[#2c4656] break-all bg-white p-3 rounded border">
+                    <div className="text-sm font-mono text-gray-900 break-all bg-white p-3 rounded border">
                       {`${window.location.origin}/invite/${effectiveTeacherId || user?.uid || 'teacher-id'}`}
                     </div>
                     <p className="text-sm text-muted-foreground mt-2">
@@ -1410,9 +1535,9 @@ export const TeacherDashboard = () => {
             </div>
             <div className="grid md:grid-cols-3 gap-6 items-stretch">
               {plans.map((plan, index) => (
-                <Card key={index} className={`h-full flex flex-col border-2 ${plan.popular ? 'border-accent shadow-xl' : ''}`}>
+                <Card key={index} className={`h-full flex flex-col bg-white border border-gray-200 shadow-sm rounded-xl ${plan.popular ? 'border-[#ee7b3d]' : ''}`}>
                   {plan.popular && (
-                    <div className="bg-accent text-accent-foreground text-center py-2 font-semibold rounded-t-lg">
+                    <div className="bg-[#ee7b3d] text-white text-center py-2 font-semibold rounded-t-xl">
                       {t('mostPopular')}
                     </div>
                   )}
@@ -1457,7 +1582,7 @@ export const TeacherDashboard = () => {
                     <ul className="space-y-3">
                       {plan.features.map((feature, fIndex) => (
                         <li key={fIndex} className="flex items-start">
-                          <Check className="w-5 h-5 text-green-600 mr-2 mt-0.5 flex-shrink-0" />
+                          <Check className="w-5 h-5 text-[#ee7b3d] mr-2 mt-0.5 flex-shrink-0" />
                           <span className="text-muted-foreground">{feature}</span>
                         </li>
                       ))}
@@ -1465,7 +1590,7 @@ export const TeacherDashboard = () => {
                   </CardContent>
                   <CardFooter className="mt-auto">
                     <Button 
-                      className={`w-full ${plan.popular ? 'bg-accent hover:bg-accent/90' : ''}`}
+                      className={`w-full ${plan.popular ? 'bg-[#ee7b3d] hover:bg-[#ee7b3d]/90 text-white' : 'border-[#ee7b3d] text-[#ee7b3d] hover:bg-[#ee7b3d]/10'}`}
                       variant={plan.popular ? 'default' : 'outline'}
                       onClick={() => openSubscription(plan)}
                       disabled={!!pendingPlanId}
@@ -1577,7 +1702,7 @@ export const TeacherDashboard = () => {
                           >
                             {isArabic ? 'رفع الإيصال وتفعيل الباقة' : 'Upload Receipt and Activate Plan'}
                           </Button>
-                          <Button variant="outline" onClick={() => setShowSubscription(false)}>
+                          <Button variant="outline" onClick={() => setShowSubscription(false)} className="border-gray-300 text-gray-700 hover:bg-gray-50">
                             {isArabic ? 'إلغاء' : 'Cancel'}
                           </Button>
                         </div>
@@ -1590,11 +1715,11 @@ export const TeacherDashboard = () => {
           )}
 
           {/* Registered Students Section */}
-          {isSubscriptionApproved && (
-          <Card className="mb-6">
+          {isSubscriptionApproved && (<>
+          <Card className="mb-6 bg-white border border-gray-200 shadow-sm rounded-xl">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <GraduationCap className="h-5 w-5 text-[#2c4656]" />
+                <GraduationCap className="h-5 w-5 text-gray-400" />
                 {language === 'ar' ? 'قائمة الطلاب المسجلين' : 'Registered Students'}
                 <Badge variant="secondary" className="ml-2">
                   {registeredStudents.length}
@@ -1634,10 +1759,10 @@ export const TeacherDashboard = () => {
                           {language === 'ar' ? 'تاريخ التسجيل' : 'Registration Date'}
                         </th>
                         <th className="text-right py-3 px-4 font-medium">
-                          {language === 'ar' ? 'آخر نشاط' : 'Last Activity'}
+                          {language === 'ar' ? 'الحالة' : 'Status'}
                         </th>
                         <th className="text-right py-3 px-4 font-medium">
-                          {language === 'ar' ? 'الحالة' : 'Status'}
+                          {language === 'ar' ? 'إجراءات' : 'Actions'}
                         </th>
                       </tr>
                     </thead>
@@ -1647,13 +1772,8 @@ export const TeacherDashboard = () => {
                           <td className="py-3 px-4 font-medium">{student.fullName}</td>
                           <td className="py-3 px-4 text-gray-600">{student.email}</td>
                           <td className="py-3 px-4 text-gray-600">
-                            {student.createdAt?.toDate?.()?.toLocaleDateString(language === 'ar' ? 'ar-SA' : 'en-US') || 
-                             new Date(student.createdAt).toLocaleDateString(language === 'ar' ? 'ar-SA' : 'en-US')}
-                          </td>
-                          <td className="py-3 px-4 text-gray-600">
-                            {student.lastActivity?.toDate?.()?.toLocaleDateString(language === 'ar' ? 'ar-SA' : 'en-US') || 
-                             (student.lastActivity ? new Date(student.lastActivity).toLocaleDateString(language === 'ar' ? 'ar-SA' : 'en-US') : 
-                              language === 'ar' ? 'غير محدد' : 'Not available')}
+                            {student.createdAt?.toDate?.()?.toLocaleDateString('en-US') || 
+                             new Date(student.createdAt).toLocaleDateString('en-US')}
                           </td>
                           <td className="py-3 px-4">
                             <Badge variant={student.isActive ? "default" : "secondary"}>
@@ -1663,6 +1783,37 @@ export const TeacherDashboard = () => {
                               }
                             </Badge>
                           </td>
+                          <td className="py-3 px-4">
+                            <div className={`flex items-center gap-2 ${language === 'ar' ? 'justify-end' : 'justify-start'}`}>
+                              <Button 
+                                variant="outline" 
+                                size="sm" 
+                                className="border-[#ee7b3d] text-[#ee7b3d] hover:bg-[#ee7b3d]/10"
+                                onClick={() => { setActiveStudent(student); setShowStudentInfo(true); }}
+                              >
+                                {language === 'ar' ? 'معلومات الحساب' : 'Account Info'}
+                              </Button>
+                              <Button 
+                                size="sm" 
+                                className="bg-[#ee7b3d] hover:bg-[#ee7b3d]/90 text-white"
+                                disabled={suspendingId === student.id}
+                                onClick={async () => {
+                                  try {
+                                    setSuspendingId(student.id);
+                                    await StudentService.toggleStudentStatus(student.id);
+                                    setRegisteredStudents(prev => prev.map(s => s.id === student.id ? { ...s, isActive: !s.isActive } : s));
+                                    toast.success(language === 'ar' ? (student.isActive ? 'تم إيقاف الحساب' : 'تم تفعيل الحساب') : (student.isActive ? 'Account suspended' : 'Account activated'));
+                                  } catch (e) {
+                                    toast.error(language === 'ar' ? 'فشل تغيير حالة الحساب' : 'Failed to change account status');
+                                  } finally {
+                                    setSuspendingId(null);
+                                  }
+                                }}
+                              >
+                                {student.isActive ? (language === 'ar' ? 'إيقاف الحساب' : 'Suspend') : (language === 'ar' ? 'تفعيل الحساب' : 'Activate')}
+                              </Button>
+                            </div>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -1671,7 +1822,106 @@ export const TeacherDashboard = () => {
               )}
             </CardContent>
           </Card>
-          )}
+          {/* Account Info Dialog */}
+          <Dialog open={showStudentInfo} onOpenChange={setShowStudentInfo}>
+            <DialogContent className="sm:max-w-2xl xl:max-w-4xl" dir={language === 'ar' ? 'rtl' : 'ltr'}>
+              <DialogHeader>
+                <DialogTitle className="text-center">{language === 'ar' ? 'معلومات الحساب' : 'Account Information'}</DialogTitle>
+              </DialogHeader>
+              {activeStudent && (
+                <div className="space-y-6">
+                  <div className="flex items-center gap-4 bg-white border border-gray-200 rounded-xl p-4">
+                    <Avatar className="w-16 h-16">
+                      <AvatarImage src={(activeStudent as any)?.photoURL || ''} alt={activeStudent.fullName} />
+                      <AvatarFallback>{activeStudent.fullName?.split(' ').map((n) => n[0]).join('')}</AvatarFallback>
+                    </Avatar>
+                    <div className="flex-1">
+                      <div className="text-xl font-semibold text-foreground">{activeStudent.fullName}</div>
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <Mail className="h-4 w-4" />
+                        <span>{activeStudent.email}</span>
+                      </div>
+                    </div>
+                    <Badge variant={activeStudent.isActive ? 'default' : 'secondary'}>
+                      {activeStudent.isActive ? (language === 'ar' ? 'نشط' : 'Active') : (language === 'ar' ? 'غير نشط' : 'Inactive')}
+                    </Badge>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="bg-white border border-gray-200 rounded-xl p-4">
+                      <div className="text-sm text-muted-foreground">{language === 'ar' ? 'الدورات المسجل بها' : 'Enrolled Courses'}</div>
+                      <div className="text-2xl font-bold">{studentCoursesForTeacher.length}</div>
+                    </div>
+                    <div className="bg-white border border-gray-200 rounded-xl p-4">
+                      <div className="text-sm text-muted-foreground">{language === 'ar' ? 'متوسط الواجبات' : 'Assignments Avg'}</div>
+                      <div className="text-2xl font-bold">{assignSummary ? `${assignSummary.average}%` : '-'}</div>
+                    </div>
+                    <div className="bg-white border border-gray-200 rounded-xl p-4">
+                      <div className="text-sm text-muted-foreground">{language === 'ar' ? 'متوسط الامتحانات' : 'Exams Avg'}</div>
+                      <div className="text-2xl font-bold">{examSummary ? `${examSummary.average}%` : '-'}</div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-3 text-sm text-gray-700">
+                      <div className="flex items-center justify-between">
+                        <span>{language === 'ar' ? 'تاريخ التسجيل' : 'Registered At'}</span>
+                        <span className="font-medium">{activeStudent.createdAt ? (activeStudent.createdAt as any)?.toDate?.()?.toLocaleString('en-US') || new Date(activeStudent.createdAt as any).toLocaleString('en-US') : '-'}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span>{language === 'ar' ? 'الحالة' : 'Status'}</span>
+                        <span className="font-medium">{activeStudent.isActive ? (language === 'ar' ? 'نشط' : 'Active') : (language === 'ar' ? 'غير نشط' : 'Inactive')}</span>
+                      </div>
+                    </div>
+                    <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-muted-foreground">{language === 'ar' ? 'الاشتراك' : 'Enrollment'}</span>
+                        <Badge variant={studentCoursesForTeacher.length > 0 ? 'default' : 'secondary'}>
+                          {studentCoursesForTeacher.length > 0 ? (language === 'ar' ? 'مشترك' : 'Enrolled') : (language === 'ar' ? 'غير مشترك' : 'Not Enrolled')}
+                        </Badge>
+                      </div>
+                      {studentCoursesForTeacher.length > 0 && (
+                        <div className="flex flex-wrap gap-2 mt-2">
+                          {studentCoursesForTeacher.map((c) => (
+                            <Badge key={c.id} variant="secondary">{c.title}</Badge>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </DialogContent>
+          </Dialog>
+          {/* Delete Confirmation */}
+          <AlertDialog open={!!deletingStudentId} onOpenChange={(open) => !open && setDeletingStudentId(null)}>
+            <AlertDialogContent dir={language === 'ar' ? 'rtl' : 'ltr'}>
+              <AlertDialogHeader>
+                <AlertDialogTitle>{language === 'ar' ? 'تأكيد حذف الحساب' : 'Confirm Account Deletion'}</AlertDialogTitle>
+                <AlertDialogDesc>{language === 'ar' ? 'سيتم حذف بيانات الطالب نهائياً ولا يمكن استعادتها.' : 'This will permanently delete the student data and cannot be undone.'}</AlertDialogDesc>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel onClick={() => setDeletingStudentId(null)}>{language === 'ar' ? 'إلغاء' : 'Cancel'}</AlertDialogCancel>
+                <AlertDialogAction 
+                  onClick={async () => {
+                    if (!deletingStudentId) return;
+                    try {
+                      await StudentService.deleteStudentProfile(deletingStudentId);
+                      setRegisteredStudents(prev => prev.filter(s => s.id !== deletingStudentId));
+                      toast.success(language === 'ar' ? 'تم حذف الحساب' : 'Account deleted');
+                    } catch (e) {
+                      toast.error(language === 'ar' ? 'فشل حذف الحساب' : 'Failed to delete account');
+                    } finally {
+                      setDeletingStudentId(null);
+                    }
+                  }}
+                >
+                  {language === 'ar' ? 'تأكيد الحذف' : 'Confirm Delete'}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+          </>)}
 
           {isSubscriptionApproved && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

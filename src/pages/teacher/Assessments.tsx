@@ -1717,14 +1717,14 @@ if (courseIdForExam) {
   };
 
   return (
-    <div className="min-h-screen bg-background" dir={language === 'ar' ? 'rtl' : 'ltr'}>
-      <DashboardHeader studentName={teacherName} />
+    <div className="min-h-screen bg-gray-50 pt-16" dir={language === 'ar' ? 'rtl' : 'ltr'}>
+      <DashboardHeader fixed studentName={teacherName} />
 
       <div className="flex min-h-[calc(100vh-4rem)]">
         <TeacherSidebar />
 
         
-        <main className="flex-1 p-6 overflow-auto">
+        <main className="md:ml-64 flex-1 p-6 overflow-y-auto">
           <div className="mb-8">
             <h1 className="text-3xl font-bold text-foreground mb-2">{t.pageTitle}</h1>
             <p className="text-muted-foreground">
@@ -1758,9 +1758,9 @@ if (courseIdForExam) {
                   <div className="p-3 text-sm text-muted-foreground">{t.sectionExam}</div>
 
               
-              <Card>
+              <Card className="bg-white border border-gray-200 shadow-sm rounded-xl">
                 <CardHeader>
-                  <CardTitle className="flex items-center gap-2"><Award className="h-5 w-5" /> {language === 'ar' ? 'إنشاء امتحان' : 'Create Exam'}</CardTitle>
+              <CardTitle className="flex items-center gap-2"><Award className="h-5 w-5 text-gray-400" /> {language === 'ar' ? 'إنشاء امتحان' : 'Create Exam'}</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="space-y-2">
@@ -1771,7 +1771,7 @@ if (courseIdForExam) {
                     <div className="space-y-2">
                       <label className="text-sm">{language === 'ar' ? 'اختيار الدورة' : 'Select course'}</label>
                       <select
-                        className="w-full border rounded h-10 px-3 bg-background"
+                        className="w-full border rounded h-10 px-3 bg-white"
                         value={exam.courseId || ''}
                         onChange={(e) => setExam(prev => ({ ...prev, courseId: e.target.value || null }))}
                       >

@@ -28,6 +28,7 @@ interface DashboardHeaderProps {
   onNotificationsOpen?: () => void;
   newNotificationPreview?: { title: string; message: string; type?: string } | null;
   onPreviewClear?: () => void;
+  fixed?: boolean;
 }
 
 export const DashboardHeader = ({ 
@@ -37,9 +38,10 @@ export const DashboardHeader = ({
   notifications = [],
   onNotificationsOpen,
   newNotificationPreview,
-  onPreviewClear
+  onPreviewClear,
+  fixed = false
 }: DashboardHeaderProps) => {
-  const { language, t } = useLanguage();
+  const { language, t, setLanguage } = useLanguage();
   const { user, logout } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
@@ -614,21 +616,26 @@ export const DashboardHeader = ({
   };
 
   return (
-    <header className="bg-card border-b border-border relative z-50" dir={'ltr'}>
-      <div className="container mx-auto px-4 py-3 flex items-center justify-between">
-        {/* Logo */}
-        <Link to="/" className="flex items-center">
-          <img 
-            src="/Header-Logo.png" 
-            alt="Manara Academy Logo" 
-            className="h-12 w-auto object-contain"
-          />
-        </Link>
-        
-        {/* Right side - Notifications and Profile */}
+    <header className={fixed ? "bg-card border-b border-border fixed top-0 left-0 right-0 z-50" : "bg-card border-b border-border relative z-50"} dir={language === 'ar' ? 'rtl' : 'ltr'}>
+      <div className={fixed ? "container mx-auto px-4 h-16 flex items-center justify-end" : "container mx-auto px-4 py-3 flex items-center justify-end"}>
+        {/* Right side - Language, Notifications and Profile */}
         <div className="flex flex-row-reverse items-center gap-4">
+          <div className="order-0">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="min-w-[96px] justify-between">
+                  <span>{language === 'ar' ? 'العربية' : 'English'}</span>
+                  <ChevronDown className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-36">
+                <DropdownMenuItem onClick={() => setLanguage('ar')}>{'العربية'}</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setLanguage('en')}>{'English'}</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
           {/* Profile Dropdown */}
-          <div className="order-1">
+          <div className="order-2">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" className="relative h-10 w-10 rounded-full">
@@ -675,7 +682,7 @@ export const DashboardHeader = ({
           </DropdownMenu>
           </div>
           {/* Notifications */}
-          <div className="order-2 relative">
+          <div className="order-1 relative">
           <DropdownMenu open={showNotifications} onOpenChange={(v) => {
             setShowNotifications(v);
             try { if (v) { if (onNotificationsOpen) onNotificationsOpen(); if (onPreviewClear) onPreviewClear(); } } catch {}

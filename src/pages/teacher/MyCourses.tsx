@@ -336,12 +336,7 @@ const teacherName = user?.displayName || (language === 'ar' ? 'مدرس جديد
           : 'You haven\'t created any courses yet. Start by creating your first course and share your knowledge with students'
         }
       </p>
-      <Link to="/teacher/create-course">
-        <Button className="bg-[#ee7b3d] hover:bg-[#d66a2c] text-white px-6 py-3 rounded-lg font-medium">
-          <Plus className="h-5 w-5 mr-2" />
-          {language === 'ar' ? 'إنشاء دورة جديدة' : 'Create New Course'}
-        </Button>
-      </Link>
+      
       
       <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-4 max-w-2xl mx-auto">
         <div className="text-center p-4 border rounded-lg">
@@ -393,14 +388,14 @@ const teacherName = user?.displayName || (language === 'ar' ? 'مدرس جديد
   );
 
   return (
-    <div className="min-h-screen bg-[#f2f2f2]" dir={language === 'ar' ? 'rtl' : 'ltr'}>
-      <DashboardHeader studentName={teacherName} />
+    <div className="min-h-screen bg-gray-50 pt-16" dir={language === 'ar' ? 'rtl' : 'ltr'}>
+      <DashboardHeader fixed studentName={teacherName} />
       
       <div className="flex min-h-[calc(100vh-4rem)]">
         <TeacherSidebar />
         
         {/* Main Content */}
-        <main className="flex-1 p-6 overflow-auto bg-[#f2f2f2]">
+        <main className="md:ml-64 flex-1 p-6 overflow-y-auto">
           {/* Header Section */}
           <div className="flex items-center justify-between mb-8">
             <div>
@@ -414,23 +409,13 @@ const teacherName = user?.displayName || (language === 'ar' ? 'مدرس جديد
                 }
               </p>
             </div>
-            {isSectionAllowed('my-courses','create-button') && (
-              <Link to="/teacher/create-course">
-                <Button 
-                  className="bg-[#ee7b3d] hover:bg-[#d66a2c] text-white px-6 py-3 rounded-lg font-medium"
-                  size="lg"
-                >
-                  <Plus className="h-5 w-5 mr-2" />
-                  {language === 'ar' ? 'إنشاء دورة جديدة' : 'Create New Course'}
-                </Button>
-              </Link>
-            )}
+            
           </div>
 
           {/* Stats Cards */}
           {isSectionAllowed('my-courses','stats-cards') && (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-            <Card className="bg-white border-0 shadow-sm">
+            <Card className="bg-white border border-gray-200 shadow-sm rounded-xl">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium text-gray-600">
                   {language === 'ar' ? 'الدورات النشطة' : 'Active Courses'}
@@ -445,7 +430,7 @@ const teacherName = user?.displayName || (language === 'ar' ? 'مدرس جديد
               </CardContent>
             </Card>
 
-            <Card className="bg-white border-0 shadow-sm">
+            <Card className="bg-white border border-gray-200 shadow-sm rounded-xl">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium text-gray-600">
                   {language === 'ar' ? 'إجمالي الطلاب' : 'Total Students'}
@@ -574,7 +559,7 @@ const teacherName = user?.displayName || (language === 'ar' ? 'مدرس جديد
                       <Button 
                         size="sm" 
                         variant="outline" 
-                        className="flex-1 border-[#2c4656] text-[#2c4656] hover:bg-[#2c4656] hover:text-white"
+                        className="flex-1 border-[#ee7b3d] text-[#ee7b3d] hover:bg-[#ee7b3d] hover:text-white"
                       >
                         <Plus className="h-4 w-4 mr-2" />
                         {language === 'ar' ? 'إضافة درس' : 'Add Lesson'}
@@ -605,7 +590,7 @@ const teacherName = user?.displayName || (language === 'ar' ? 'مدرس جديد
 
           {/* إدارة المحتوى داخل الصفحة */}
           {editingCourseId && (
-            <Card className="bg-white border-0 shadow-md mb-8">
+              <Card className="bg-white border border-gray-200 shadow-sm rounded-xl mb-8">
               <CardHeader>
                 <CardTitle className="text-[#2c4656]">
                   {language === 'ar' ? 'إدارة محتوى الدورة' : 'Manage Course Content'}

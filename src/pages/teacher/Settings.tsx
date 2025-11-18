@@ -469,12 +469,12 @@ const TeacherSettings = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background" dir={language === 'ar' ? 'rtl' : 'ltr'}>
-      <DashboardHeader studentName={profile?.fullName || user?.displayName || user?.email || ''} />
-      <div className="container mx-auto px-4 py-6 flex gap-6">
+    <div className="min-h-screen bg-gray-50 pt-16" dir={language === 'ar' ? 'rtl' : 'ltr'}>
+      <DashboardHeader fixed studentName={profile?.fullName || user?.displayName || user?.email || ''} />
+      <div className="container mx-auto px-4 py-6">
         <TeacherSidebar />
-        <main className="flex-1">
-          <Card>
+        <main className="md:ml-64">
+          <Card className="bg-white border border-gray-200 shadow-sm rounded-xl">
             <CardHeader>
               <div className="flex items-center justify-between">
                 <CardTitle className="flex items-center gap-2">
@@ -482,11 +482,11 @@ const TeacherSettings = () => {
                   {language === 'ar' ? 'إعدادات الحساب' : 'Account Settings'}
                 </CardTitle>
                 <div className="flex items-center gap-3">
-                  <Button variant="outline" size="sm" onClick={startEditFullName} disabled={saving}>
+                  <Button variant="outline" size="sm" onClick={startEditFullName} disabled={saving} className="border-[#ee7b3d] text-[#ee7b3d] hover:bg-[#ee7b3d] hover:text-white">
                     <Edit3 className="h-4 w-4 mr-2" />
                     {language === 'ar' ? 'تعديل الاسم' : 'Edit Name'}
                   </Button>
-                  <Button size="sm" onClick={saveChanges} disabled={saving || !editingFullName || !fullNameInput.trim()}>
+                  <Button size="sm" onClick={saveChanges} disabled={saving || !editingFullName || !fullNameInput.trim()} className="bg-[#ee7b3d] hover:bg-[#ee7b3d]/90 text-white">
                     {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
                     {language === 'ar' ? 'حفظ التغييرات' : 'Save Changes'}
                   </Button>
@@ -531,7 +531,7 @@ const TeacherSettings = () => {
           </Card>
 
           {/* Assistant creation section */}
-          <Card className="mt-6">
+          <Card className="mt-6 bg-white border border-gray-200 shadow-sm rounded-xl">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <UserPlus className="h-5 w-5" />

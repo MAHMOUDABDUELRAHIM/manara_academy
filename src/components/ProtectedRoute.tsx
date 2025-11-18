@@ -202,7 +202,7 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, requiredRole,
         } catch {}
         try { localStorage.setItem('adminCancelled', adminCancelled ? 'true' : 'false'); } catch {}
 
-        const hasActiveSub = !!validApproved;
+        const hasActiveSub = !!validApproved || !!validPending;
         if (!cancelled) setIsSubApproved(hasActiveSub);
         try { localStorage.setItem('hasActiveSubscription', hasActiveSub ? 'true' : 'false'); } catch {}
 

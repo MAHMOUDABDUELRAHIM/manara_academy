@@ -1028,14 +1028,14 @@ export default function InviteStudents() {
   }
 
   return (
-    <div className="min-h-screen bg-background" dir={language === 'ar' ? 'rtl' : 'ltr'}>
-      <DashboardHeader studentName={user.displayName || 'المدرس'} />
+    <div className="min-h-screen bg-gray-50 pt-16" dir={language === 'ar' ? 'rtl' : 'ltr'}>
+      <DashboardHeader fixed studentName={user.displayName || 'المدرس'} />
       
       <div className="flex min-h-[calc(100vh-4rem)]">
         <TeacherSidebar />
         
         {/* Main Content */}
-        <main className="flex-1 p-6 overflow-auto">
+        <main className="md:ml-64 flex-1 p-6 overflow-y-auto">
           <div className="max-w-6xl mx-auto space-y-6">
             {/* Page Header */}
             <div className="flex items-center gap-3 mb-6">
@@ -1099,7 +1099,7 @@ export default function InviteStudents() {
               {activeTab === 'platform' && (
                 <>
                   {/* Platform Branding Section */}
-                  <Card className="bg-white border-0 shadow-sm">
+                  <Card className="bg-white border border-gray-200 shadow-sm rounded-xl">
                     <CardHeader>
                       <CardTitle className="flex items-center gap-2">
                         <Edit className="h-5 w-5 text-[#2c4656]" />
@@ -1132,7 +1132,7 @@ export default function InviteStudents() {
                           />
                           <Button
                             disabled={isUploadingLogo}
-                            className="bg-[#2c4656] hover:bg-[#1e3240]"
+                            className="bg-[#ee7b3d] hover:bg-[#ee7b3d]/90"
                             onClick={() => logoInputRef.current?.click()}
                           >
                             {isUploadingLogo
@@ -1187,10 +1187,10 @@ export default function InviteStudents() {
                   </Card>
 
                   {/* Live Preview Section - header-only, live reflects draft changes */}
-                  <Card className="bg-white border-0 shadow-sm">
+                  <Card className="bg-white border border-gray-200 shadow-sm rounded-xl">
                     <CardHeader>
                       <CardTitle className="flex items-center gap-2">
-                        <Palette className="h-5 w-5 text-[#2c4656]" />
+                        <Palette className="h-5 w-5 text-gray-400" />
                         {language === 'ar' ? 'معاينة مباشرة' : 'Live Preview'}
                       </CardTitle>
                     </CardHeader>
@@ -1220,10 +1220,10 @@ export default function InviteStudents() {
                   </Card>
 
                   {/* Hero Editor Section with Live Preview */}
-                  <Card className="bg-white border-0 shadow-sm">
+                  <Card className="bg-white border border-gray-200 shadow-sm rounded-xl">
                     <CardHeader>
                       <CardTitle className="flex items-center gap-2">
-                        <Edit className="h-5 w-5 text-[#2c4656]" />
+                        <Edit className="h-5 w-5 text-gray-400" />
                         {language === 'ar' ? 'تحرير العنوان الرئيسي' : 'Hero Section Editor'}
                       </CardTitle>
                     </CardHeader>
@@ -1240,7 +1240,7 @@ export default function InviteStudents() {
                           />
                           <Button
                             disabled={isSavingHero}
-                            className="bg-[#2c4656] hover:bg-[#1e3240]"
+                            className="bg-[#ee7b3d] hover:bg-[#ee7b3d]/90"
                             onClick={saveHeroSettings}
                           >
                             {isSavingHero

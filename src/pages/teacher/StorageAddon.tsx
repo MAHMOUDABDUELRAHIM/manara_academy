@@ -221,7 +221,7 @@ export default function StorageAddon() {
   }, [user?.uid, language]);
 
   return (
-    <div className="min-h-screen bg-background" dir={language === 'ar' ? 'rtl' : 'ltr'}>
+    <div className="min-h-screen bg-gray-50" dir={language === 'ar' ? 'rtl' : 'ltr'}>
       <DashboardHeader />
       <div className="flex">
         <TeacherSidebar isSubscriptionApproved={true} />

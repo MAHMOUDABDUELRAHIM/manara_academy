@@ -64,6 +64,8 @@ export const TeacherSidebar = ({ className, isSubscriptionApproved = false }: Te
     } catch {}
     setApproved(isSubscriptionApproved || active || approvedLS);
   }, [isSubscriptionApproved]);
+  const mainLogoSrc = "/Header-Logo.png";
+  const collapsedLogoSrc = "/socialMedia-logo - Copy.png";
   useEffect(() => {
     const onStorage = (e: StorageEvent) => {
       if (e.key === 'isSubscriptionApproved') {
@@ -165,29 +167,26 @@ export const TeacherSidebar = ({ className, isSubscriptionApproved = false }: Te
       {/* Sidebar */}
       <aside 
         className={cn(
-          "fixed left-0 top-0 bottom-16 bg-white transition-all duration-300 z-40",
+          "fixed top-0 bottom-0 left-0 transition-all duration-300 z-[60]",
           "flex flex-col",
           isCollapsed ? "w-16" : "w-64",
-          // Mobile styles
-          "md:relative md:top-0 md:bottom-0 md:h-[calc(100vh-4rem)] md:translate-x-0",
+          "md:fixed md:top-0 md:bottom-0 md:h-screen md:translate-x-0",
           isMobileOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0",
           className
         )}
         dir={language === 'ar' ? 'rtl' : 'ltr'}
       >
-        {/* Sidebar Header */}
-        <div className="p-4 border-b border-gray-200 flex-shrink-0">
+        <div className="px-4 py-3 border-b border-[#2a1f62] flex-shrink-0 bg-[#1d1442]">
           <div className="flex items-center justify-between">
-            {!isCollapsed && (
-              <h2 className="text-lg font-semibold text-[#2c4656]">
-                {language === 'ar' ? 'التنقل' : 'Navigation'}
-              </h2>
-            )}
+            <div className={cn("flex items-center", isCollapsed ? "justify-center w-full" : "gap-3")}
+            >
+              <img src={isCollapsed ? collapsedLogoSrc : mainLogoSrc} alt={"Manara Logo"} className={cn("object-contain", isCollapsed ? "h-8 w-8 rounded" : "h-10 w-auto")} />
+            </div>
             <Button
               variant="ghost"
               size="sm"
               onClick={toggleCollapse}
-              className="hidden md:flex h-8 w-8 p-0 hover:bg-gray-100"
+              className="hidden md:flex h-8 w-8 p-0 hover:bg-[#2a1f62] text-gray-200"
             >
               {language === 'ar' ? (
                 isCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />
@@ -198,59 +197,144 @@ export const TeacherSidebar = ({ className, isSubscriptionApproved = false }: Te
           </div>
         </div>
 
-        {/* Navigation Items */}
-        <nav className="flex-1 p-4 overflow-y-auto min-h-0">
-          <ul className="space-y-2">
-            {sidebarItems.map((item) => {
-              const Icon = item.icon;
-              const active = isActive(item.href);
-              // Lock only when trial expired and subscription not approved.
-              // With approved subscription, unlock all sidebar pages similar to trial.
-              const expiredAndNotApproved = (!approved && trialExpired);
-              const locked = expiredAndNotApproved && item.id !== 'dashboard';
-              // Always navigate to intended href; rely on ProtectedRoute for gating/redirect
-              const targetHref = item.href;
-
-              return (
-                <li key={item.id}>
-                  <Link
-                    to={targetHref}
-                    onClick={() => setIsMobileOpen(false)}
-                    aria-disabled={locked}
+        <nav className="flex-1 p-4 overflow-y-auto min-h-0 bg-[#1d1442] text-gray-200">
+          <div className="space-y-6">
+            <div>
+              {!isCollapsed && (
+                <div className="px-3 pb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
+                  {language === 'ar' ? 'وصول البيانات' : 'Data Access'}
+                </div>
+              )}
+              <ul className="space-y-2">
+                {sidebarItems.filter(i => ['dashboard','my-courses','assessments','create-course'].includes(i.id)).map((item) => {
+                  const Icon = item.icon;
+                  const active = isActive(item.href);
+                  const expiredAndNotApproved = (!approved && trialExpired);
+                  const locked = expiredAndNotApproved && item.id !== 'dashboard';
+                  const targetHref = item.href;
+                  return (
+                    <li key={item.id}>
+                      <Link
+                        to={targetHref}
+                        onClick={() => setIsMobileOpen(false)}
+                        aria-disabled={locked}
                     className={cn(
-                      "flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors",
-                      "hover:bg-gray-100 hover:text-[#2c4656]",
-                      active && "bg-[#2c4656] text-white hover:bg-[#1e3240]",
+                      "flex items-center gap-3 px-3 py-2.5 rounded-md transition-colors",
+                      "hover:bg-[#2a1f62] hover:text-white",
+                      active && "bg-[#2a1f62] text-white",
                       isCollapsed && "justify-center px-2",
                       locked && "opacity-60 cursor-not-allowed"
                     )}
-                  >
-                    {locked ? (
-                      <Lock className={cn("h-5 w-5 flex-shrink-0")} />
-                    ) : (
-                      <Icon className={cn("h-5 w-5 flex-shrink-0")} />
-                    )}
-                    {!isCollapsed && (
-                      <span className="text-sm font-medium truncate">
-                        {item.label}
-                        {locked && (
-                          <span className="ml-2 text-xs text-muted-foreground">
-                            {language === 'ar' ? 'مغلق حتى التفعيل' : 'Locked until activation'}
+                      >
+                        {locked ? (
+                          <Lock className={cn("h-5 w-5 flex-shrink-0")} />
+                        ) : (
+                          <Icon className={cn("h-5 w-5 flex-shrink-0")} />
+                        )}
+                        {!isCollapsed && (
+                          <span className="text-sm font-medium truncate">
+                            {item.label}
                           </span>
                         )}
-                      </span>
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+            <div>
+              {!isCollapsed && (
+                <div className="px-3 pb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
+                  {language === 'ar' ? 'المستخدمون والمجموعات' : 'Users & Groups'}
+                </div>
+              )}
+              <ul className="space-y-2">
+                {sidebarItems.filter(i => ['invite-students'].includes(i.id)).map((item) => {
+                  const Icon = item.icon;
+                  const active = isActive(item.href);
+                  const expiredAndNotApproved = (!approved && trialExpired);
+                  const locked = expiredAndNotApproved && item.id !== 'dashboard';
+                  const targetHref = item.href;
+                  return (
+                    <li key={item.id}>
+                      <Link
+                        to={targetHref}
+                        onClick={() => setIsMobileOpen(false)}
+                        aria-disabled={locked}
+                    className={cn(
+                      "flex items-center gap-3 px-3 py-2.5 rounded-md transition-colors",
+                      "hover:bg-[#2a1f62] hover:text-white",
+                      active && "bg-[#2a1f62] text-white",
+                      isCollapsed && "justify-center px-2",
+                      locked && "opacity-60 cursor-not-allowed"
                     )}
-                  </Link>
-                </li>
-              );
-            })}
-          </ul>
+                      >
+                        {locked ? (
+                          <Lock className={cn("h-5 w-5 flex-shrink-0")} />
+                        ) : (
+                          <Icon className={cn("h-5 w-5 flex-shrink-0")} />
+                        )}
+                        {!isCollapsed && (
+                          <span className="text-sm font-medium truncate">
+                            {item.label}
+                          </span>
+                        )}
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+            <div>
+              {!isCollapsed && (
+                <div className="px-3 pb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                  {language === 'ar' ? 'حسابك' : 'Your Account'}
+                </div>
+              )}
+              <ul className="space-y-2">
+                {sidebarItems.filter(i => i.id === 'payouts').map((item) => {
+                  const Icon = item.icon;
+                  const active = isActive(item.href);
+                  const expiredAndNotApproved = (!approved && trialExpired);
+                  const locked = expiredAndNotApproved && item.id !== 'dashboard';
+                  const targetHref = item.href;
+                  return (
+                    <li key={item.id}>
+                      <Link
+                        to={targetHref}
+                        onClick={() => setIsMobileOpen(false)}
+                        aria-disabled={locked}
+                        className={cn(
+                          "flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors",
+                          "hover:bg-gray-100 hover:text-[#2c4656]",
+                          active && "bg-[#2c4656] text-white hover:bg-[#1e3240]",
+                          isCollapsed && "justify-center px-2",
+                          locked && "opacity-60 cursor-not-allowed"
+                        )}
+                      >
+                        {locked ? (
+                          <Lock className={cn("h-5 w-5 flex-shrink-0")} />
+                        ) : (
+                          <Icon className={cn("h-5 w-5 flex-shrink-0")} />
+                        )}
+                        {!isCollapsed && (
+                          <span className="text-sm font-medium truncate">
+                            {item.label}
+                          </span>
+                        )}
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          </div>
         </nav>
 
         {/* Sidebar Footer */}
-        <div className="p-3 border-t border-gray-200 flex-shrink-0">
+        <div className="p-3 border-t border-[#2a1f62] flex-shrink-0 bg-[#1d1442]">
           {!isCollapsed && (
-            <div className="text-xs text-gray-500 text-center">
+            <div className="text-xs text-gray-400 text-center">
               © Manara Academy 2025
             </div>
           )}

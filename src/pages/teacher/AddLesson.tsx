@@ -586,10 +586,10 @@ export const AddLesson = () => {
               
 
               {/* Video Upload */}
-              <Card className="shadow-none rounded-xl bg-gray-50">
+              <Card className="bg-white border border-gray-200 shadow-sm rounded-xl">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
-                    <FileVideo className="h-5 w-5 text-[#2c4656]" />
+                    <FileVideo className="h-5 w-5 text-gray-400" />
                     {language === 'ar' ? 'تفاصيل الدرس' : 'Lesson Details'}
                   </CardTitle>
                 </CardHeader>
@@ -864,8 +864,8 @@ export const AddLesson = () => {
                                 } catch { return 'cursor-pointer'; }
                               })()}`}
                             >
-                              <div className="w-16 h-16 bg-[#2c4656]/10 rounded-full flex items-center justify-center">
-                                <FileVideo className="h-8 w-8 text-[#2c4656]" />
+                              <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center">
+                                <FileVideo className="h-8 w-8 text-gray-400" />
                               </div>
                               <div>
                                 <p className="text-lg font-medium text-gray-900">
@@ -1043,7 +1043,7 @@ export const AddLesson = () => {
                     (!!uploadedVideoProvider && !isUploading)
                   )
                 }
-                className="bg-[#2c4656] hover:bg-[#1e3240] text-white px-8 py-2 flex items-center gap-2"
+                className="bg-[#ee7b3d] hover:bg-[#ee7b3d]/90 text-white px-8 py-2 flex items-center gap-2"
               >
                 {isPublishing ? (
                   <>

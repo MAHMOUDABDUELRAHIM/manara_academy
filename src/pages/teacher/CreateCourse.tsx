@@ -250,14 +250,14 @@ export const TeacherCreateCourse = () => {
   // Removed lesson type icon helper
 
   return (
-    <div className="min-h-screen bg-[#f2f2f2]" dir={language === 'ar' ? 'rtl' : 'ltr'}>
-      <DashboardHeader studentName={teacherName} />
+    <div className="min-h-screen bg-gray-50 pt-16" dir={language === 'ar' ? 'rtl' : 'ltr'}>
+      <DashboardHeader fixed studentName={teacherName} />
       
       <div className="flex min-h-[calc(100vh-4rem)]">
         <TeacherSidebar />
         
         {/* Main Content */}
-        <main className="flex-1 p-6 overflow-auto bg-[#f2f2f2]">
+        <main className="md:ml-64 flex-1 p-6 overflow-y-auto">
           {/* Header Section */}
           <div className="flex items-center justify-between mb-8">
             <div className="flex items-center gap-4">
@@ -286,7 +286,7 @@ export const TeacherCreateCourse = () => {
           <form onSubmit={handleSubmit} className="space-y-8">
             {/* Course Basic Information */}
             {isSectionAllowed('create-course','basic-info') ? (
-            <Card className="bg-white border-0 shadow-sm">
+            <Card className="bg-white border border-gray-200 shadow-sm rounded-xl">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-[#2c4656]">
                   <BookOpen className="h-5 w-5" />

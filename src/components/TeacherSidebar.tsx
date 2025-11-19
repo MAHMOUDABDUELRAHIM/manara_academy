@@ -43,6 +43,20 @@ export const TeacherSidebar = ({ className, isSubscriptionApproved = false }: Te
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   const [pendingSubCount, setPendingSubCount] = useState<number>(0);
 
+  useEffect(() => {
+    const onToggle = (e: Event) => {
+      try {
+        const detail = (e as CustomEvent).detail as { open?: boolean } | undefined;
+        const open = !!detail?.open;
+        setIsMobileOpen(open);
+      } catch {
+        setIsMobileOpen((prev) => !prev);
+      }
+    };
+    window.addEventListener('teacherSidebar:toggle', onToggle as EventListener);
+    return () => window.removeEventListener('teacherSidebar:toggle', onToggle as EventListener);
+  }, []);
+
   // Effective approval status: prefer prop when provided, otherwise fall back to localStorage
   const [approved, setApproved] = useState<boolean>(() => {
     if (isSubscriptionApproved) return true;

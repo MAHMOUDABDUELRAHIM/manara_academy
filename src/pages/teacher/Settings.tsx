@@ -105,6 +105,8 @@ const TeacherSettings = () => {
   const [fullNameInput, setFullNameInput] = useState('');
   const [saving, setSaving] = useState(false);
   const [sendingReset, setSendingReset] = useState(false);
+  const [phoneInput, setPhoneInput] = useState('');
+  const [savingPhone, setSavingPhone] = useState(false);
   // Assistant creation state
   const [assistantName, setAssistantName] = useState('');
   const [assistantEmail, setAssistantEmail] = useState('');
@@ -251,6 +253,7 @@ const TeacherSettings = () => {
         if (teacher?.fullName) setFullNameInput(teacher.fullName);
         if (typeof teacher?.photoURL === 'string') setProfilePhotoURL(teacher.photoURL || '');
         if (typeof teacher?.bio === 'string') setBioInput(teacher.bio || '');
+        if (typeof (teacher as any)?.phoneNumber === 'string') setPhoneInput((teacher as any).phoneNumber || '');
         if (typeof (teacher as any)?.platformName === 'string') setPlatformNameInput((teacher as any).platformName || '');
         if (typeof (teacher as any)?.brandLogoBase64 === 'string') setBrandLogoBase64((teacher as any).brandLogoBase64 || '');
         if (typeof (teacher as any)?.brandHeroTitle === 'string') setHeroTitleInput((teacher as any).brandHeroTitle || '');
@@ -325,6 +328,22 @@ const TeacherSettings = () => {
       toast.error(language === 'ar' ? 'فشل حفظ التغييرات' : 'Failed to save changes');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const savePhone = async () => {
+    if (!user?.uid) return;
+    const v = phoneInput.trim();
+    try {
+      setSavingPhone(true);
+      await TeacherService.updateTeacherProfile(user.uid, { phoneNumber: v });
+      setProfile(prev => prev ? { ...prev, phoneNumber: v, updatedAt: new Date().toISOString() } as any : prev);
+      toast.success(language === 'ar' ? 'تم حفظ رقم الهاتف' : 'Phone number saved');
+    } catch (e) {
+      console.error('Save phone error', e);
+      toast.error(language === 'ar' ? 'فشل حفظ رقم الهاتف' : 'Failed to save phone number');
+    } finally {
+      setSavingPhone(false);
     }
   };
 
@@ -637,6 +656,7 @@ const TeacherSettings = () => {
               {loading ? (
                 <p className="text-muted-foreground">{language === 'ar' ? 'جارِ التحميل...' : 'Loading...'}</p>
               ) : (
+                <div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label>{language === 'ar' ? 'الاسم الكامل' : 'Full Name'}</Label>
@@ -654,6 +674,17 @@ const TeacherSettings = () => {
                     <Label>{language === 'ar' ? 'التخصص' : 'Specialization'}</Label>
                     <Input value={profile?.subjectSpecialization || ''} readOnly />
                   </div>
+                  <div className="space-y-2">
+                    <Label>{language === 'ar' ? 'رقم الهاتف' : 'Phone Number'}</Label>
+                    <div className="flex items-center gap-2">
+                      <Input value={phoneInput} onChange={(e) => setPhoneInput(e.target.value.replace(/[^0-9]/g, ''))} />
+                      <Button onClick={savePhone} disabled={savingPhone} className="bg-[#ee7b3d] hover:bg-[#ee7b3d]/90 text-white">
+                        {savingPhone && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                        {language === 'ar' ? 'حفظ رقم الهاتف' : 'Save Phone Number'}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
                 </div>
               )}
               <div className="mt-6">
@@ -710,52 +741,7 @@ const TeacherSettings = () => {
           </CardContent>
         </Card>
 
-        <Card className="mt-6 bg-white border border-gray-200 shadow-sm rounded-xl">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Palette className="h-5 w-5" />
-              {language === 'ar' ? 'إعدادات المنصة' : 'Platform Branding'}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="space-y-2">
-                <Label>{language === 'ar' ? 'اسم المنصة' : 'Platform Name'}</Label>
-                <Input value={platformNameInput} onChange={(e) => setPlatformNameInput(e.target.value)} className="h-12 rounded-lg shadow-sm border-gray-200 bg-white" />
-              </div>
-              <div className="space-y-2">
-                <Label>{language === 'ar' ? 'لوجو المنصة' : 'Platform Logo'}</Label>
-                <div className="flex items-center gap-4">
-                  <img src={brandLogoBase64 || '/Header-Logo.png'} alt="brand logo" className="h-16 w-16 rounded object-contain border" />
-                  <div className="flex items-center gap-2">
-                    <Input type="file" accept="image/*" onChange={async (e) => { const f = e.target.files?.[0]; if (f) setBrandLogoBase64(await compressImageToBase64(f, 512, 0.8)); }} />
-                    <Button className="bg-[#ee7b3d] hover:bg-[#ee7b3d]/90 text-white" onClick={saveBranding}>
-                      <UploadCloud className="h-4 w-4 mr-2" />
-                      {language === 'ar' ? 'حفظ' : 'Save'}
-                    </Button>
-                  </div>
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label>{language === 'ar' ? 'نص الـ Hero' : 'Hero Text'}</Label>
-                <Input value={heroTitleInput} onChange={(e) => setHeroTitleInput(e.target.value)} className="h-12 rounded-lg shadow-sm border-gray-200 bg-white" />
-              </div>
-              <div className="space-y-2">
-                <Label>{language === 'ar' ? 'صورة الـ Hero' : 'Hero Image'}</Label>
-                <div className="flex items-center gap-4">
-                  <img src={heroImageBase64 || '/manara-hero.png'} alt="hero" className="h-20 w-32 rounded object-cover border" />
-                  <div className="flex items-center gap-2">
-                    <Input type="file" accept="image/*" onChange={async (e) => { const f = e.target.files?.[0]; if (f) setHeroImageBase64(await compressImageToBase64(f, 1024, 0.8)); }} />
-                    <Button className="bg-[#ee7b3d] hover:bg-[#ee7b3d]/90 text-white" onClick={saveBranding}>
-                      <UploadCloud className="h-4 w-4 mr-2" />
-                      {language === 'ar' ? 'حفظ' : 'Save'}
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+        
 
           {/* Assistant creation section */}
           <Card className="mt-6 bg-white border border-gray-200 shadow-sm rounded-xl">

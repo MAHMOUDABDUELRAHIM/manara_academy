@@ -51,6 +51,7 @@ export const DashboardHeader = ({
   const bellRef = useRef<HTMLButtonElement | null>(null);
   const [previewPos, setPreviewPos] = useState<{ top: number; left: number } | null>(null);
   const [planOpen, setPlanOpen] = useState(false);
+  const [showNotificationsMobile, setShowNotificationsMobile] = useState(false);
   // Ticking clock for live countdowns
   const [nowTick, setNowTick] = useState<number>(Date.now());
   useEffect(() => {
@@ -116,12 +117,22 @@ export const DashboardHeader = ({
   useEffect(() => {
     const src = newNotificationPreviewInternal;
     const key = src ? `${src.title}\n${src.message}\n${src.type || ''}` : '';
-    const shouldPlay = !!src && !showNotifications && key && key !== lastPreviewKeyRef.current;
+    const shouldPlay = !!src && !showNotifications && !showNotificationsMobile && key && key !== lastPreviewKeyRef.current;
     if (shouldPlay) {
       lastPreviewKeyRef.current = key;
       playNotificationChime();
     }
-  }, [newNotificationPreviewInternal, showNotifications]);
+  }, [newNotificationPreviewInternal, showNotifications, showNotificationsMobile]);
+
+  useEffect(() => {
+    const init = () => { try { ensureAudioCtx(); } catch {} };
+    window.addEventListener('click', init, { once: true });
+    window.addEventListener('touchstart', init, { once: true });
+    return () => {
+      window.removeEventListener('click', init);
+      window.removeEventListener('touchstart', init);
+    };
+  }, []);
   const formatNotifTime = (iso?: string) => {
     try {
       const d = iso ? new Date(iso) : new Date();
@@ -773,9 +784,192 @@ export const DashboardHeader = ({
 
   return (
     <header className={fixed ? "bg-card border-b border-border fixed top-0 left-0 right-0 z-50" : "bg-card border-b border-border relative z-50"} dir="ltr">
-      <div className={fixed ? "container mx-auto px-4 h-16 flex items-center justify-end" : "container mx-auto px-4 py-3 flex items-center justify-end"}>
+      <div className={fixed ? "container mx-auto px-4 h-16 flex items-center justify-between" : "container mx-auto px-4 py-3 flex items-center justify-between"}>
+        {/* Left: mobile menu button */}
+        <div className="flex items-center gap-3">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="md:hidden h-9 w-9 p-0"
+            onClick={() => {
+              try {
+                const ev = new CustomEvent('teacherSidebar:toggle', { detail: { open: true } });
+                window.dispatchEvent(ev);
+              } catch {}
+            }}
+            aria-label={language === 'ar' ? 'القائمة' : 'Menu'}
+          >
+            {/* Simple hamburger icon */}
+            <div className="flex flex-col items-center justify-center gap-1">
+              <span className="block w-5 h-0.5 bg-foreground"></span>
+              <span className="block w-5 h-0.5 bg-foreground"></span>
+              <span className="block w-5 h-0.5 bg-foreground"></span>
+            </div>
+          </Button>
+          {/* Mobile logo visible in header */}
+          <img src="/Header-Logo.png" alt="Manara Logo" className="md:hidden h-8 w-auto object-contain" />
+        </div>
+
+        <div className="md:hidden flex items-center gap-3">
+          <DropdownMenu open={showNotificationsMobile} onOpenChange={(v) => {
+            setShowNotificationsMobile(v);
+            try { if (v) { if (onNotificationsOpen) onNotificationsOpen(); if (onPreviewClear) onPreviewClear(); } } catch (e) { void e }
+          }}>
+            <DropdownMenuTrigger asChild>
+              <Button ref={bellRef} variant="ghost" size="sm" className="relative h-9 w-9 p-0" onClick={() => { try { ensureAudioCtx(); } catch {} }}>
+                <Bell className="h-5 w-5" />
+                {(((notificationCount && notificationCount > 0) ? notificationCount : headerNotificationCount) > 0) && (
+                  <Badge 
+                    variant="destructive" 
+                    className="absolute -top-1 -right-1 h-5 w-5 rounded-full p-0 flex items-center justify-center text-xs"
+                  >
+                    {(((notificationCount && notificationCount > 0) ? notificationCount : headerNotificationCount) > 9) ? '9+' : ((notificationCount && notificationCount > 0) ? notificationCount : headerNotificationCount)}
+                  </Badge>
+                )}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="end"
+              className="w-[20rem] z-10"
+              onPointerDownCapture={() => { try { onNotificationsOpen && onNotificationsOpen(); } catch {} }}
+              style={{ fontFamily: language === 'ar' ? "'Noto Naskh Arabic','Cairo','Tajawal', system-ui, sans-serif" : undefined }}
+            >
+              <div className="p-3 border-b flex items-center justify-between">
+                <h4 className="font-medium">{t('notifications')} ({headerNotificationCount})</h4>
+                <button
+                  type="button"
+                  className="text-xs text-primary hover:underline"
+                  onClick={() => {
+                    try {
+                      const uidVal = user?.uid || 'anonymous';
+                      const list = ((notifications && notifications.length > 0) ? notifications : headerNotifications);
+                      list.forEach((n) => { try { localStorage.setItem(`notifRead:${uidVal}:${n.id}`, 'true'); } catch (e) { void e } });
+                      try {
+                        const next = new Set<string>(readIds);
+                        list.forEach((n) => next.add(n.id));
+                        setReadIds(next);
+                      } catch {}
+                      setHeaderNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
+                      setHeaderNotificationCount(0);
+                    } catch (e) { void e }
+                  }}
+                >
+                  {language === 'ar' ? 'تعليم الكل كمقروء' : 'Mark all as seen'}
+                </button>
+              </div>
+              <div className="max-h-80 overflow-y-auto">
+                {(((notifications && notifications.length > 0) ? notifications : headerNotifications).length === 0) ? (
+                  <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
+                    <Bell className="h-8 w-8 mb-2 opacity-50" />
+                    <p className="text-sm text-center">
+                      {language === 'ar' ? 'لا توجد إشعارات' : 'No notifications'}
+                    </p>
+                    <p className="text-xs mt-1 text-center">
+                      {language === 'ar' ? 'ستظهر الإشعارات هنا' : 'Notifications will appear here'}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="divide-y">
+                    {(() => {
+                      const uidVal = user?.uid || 'anonymous';
+                      const rawList = ((notifications && notifications.length > 0) ? notifications : headerNotifications);
+                      const visibleList = rawList.filter((n) => {
+                        const read = readIds.has(n.id) || (n as any).isRead === true || isNotifRead(uidVal, n.id);
+                        return !read;
+                      }).sort((a, b) => {
+                        try {
+                          const titleWelcome = language === 'ar' ? 'مرحبًا بك في منارة' : 'Welcome to Manara';
+                          const titleGuide = language === 'ar' ? 'إرشادات البدء للمدرّس' : 'Getting Started Guide';
+                          const aIsWelcome = a.title === titleWelcome;
+                          const bIsWelcome = b.title === titleWelcome;
+                          const aIsGuide = a.title === titleGuide;
+                          const bIsGuide = b.title === titleGuide;
+                          if (aIsWelcome && !bIsWelcome) return -1;
+                          if (!aIsWelcome && bIsWelcome) return 1;
+                          if (aIsGuide && !bIsGuide) return 1;
+                          if (!aIsGuide && bIsGuide) return -1;
+                          const ta = new Date(a.time).getTime();
+                          const tb = new Date(b.time).getTime();
+                          return ta - tb;
+                        } catch {
+                          return 0;
+                        }
+                      });
+                      return visibleList.map((n) => (
+                        <div key={n.id} className="p-3 rounded-md transition-colors hover:bg-[#ee7b3d]/10" dir="ltr">
+                          <div className={`flex items-start justify-between ${language === 'ar' ? 'flex-row-reverse' : ''}`}>
+                            <div className={`flex-1 ${language === 'ar' ? 'text-right' : ''}`}>
+                              <div className="text-sm font-medium">{n.title}</div>
+                              <div className={`mt-1 text-xs text-muted-foreground whitespace-normal w-full break-words leading-6`}>{n.message}</div>
+                              <div className="text-[11px] text-muted-foreground mt-2">{formatNotifTime(n.time)}</div>
+                            </div>
+                            <div className="flex-shrink-0 ml-3 flex items-center gap-2">
+                              {(n as any).type === 'warning' ? (
+                                <AlertTriangle className="h-4 w-4 text-yellow-500" />
+                              ) : (n as any).type === 'success' ? (
+                                <Check className="h-4 w-4 text-green-500" />
+                              ) : (
+                                <Bell className="h-4 w-4 text-muted-foreground" />
+                              )}
+                              <button
+                                type="button"
+                                aria-label={language === 'ar' ? 'تعليم كمقروء' : 'Mark as seen'}
+                                className="rounded border border-border px-1 py-0.5 hover:bg-muted"
+                                onClick={() => {
+                                  try {
+                                    const uidVal2 = user?.uid || 'anonymous';
+                                    localStorage.setItem(`notifRead:${uidVal2}:${n.id}`, 'true');
+                                  } catch {}
+                                  try {
+                                    const next = new Set<string>(readIds);
+                                    next.add(n.id);
+                                    setReadIds(next);
+                                  } catch {}
+                                  setHeaderNotifications((prev) => prev.map((x) => (x.id === n.id ? ({ ...x, isRead: true } as any) : x)) as any);
+                                  setHeaderNotificationCount((c) => Math.max(0, c - 1));
+                                }}
+                              >
+                                <Check className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                          {(n as any).linkUrl && (
+                            <div className="mt-2">
+                              <Link to={(n as any).linkUrl || '#'} className="text-[11px] text-primary hover:underline">
+                                {(n as any).linkText || (language === 'ar' ? 'فتح' : 'Open')}
+                              </Link>
+                            </div>
+                          )}
+                        </div>
+                      ));
+                    })()}
+                  </div>
+                )}
+              </div>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <Link
+            to={
+              location.pathname.startsWith('/teacher-dashboard') || user?.role === 'teacher'
+                ? '/teacher-dashboard/settings'
+                : (location.pathname.startsWith('/admin') || user?.role === 'admin')
+                  ? '/admin/settings'
+                  : '/dashboard/settings'
+            }
+            aria-label={language === 'ar' ? 'إعدادات المدرّس' : 'Teacher settings'}
+            onClick={() => { try { ensureAudioCtx(); } catch {} }}
+          >
+            <Avatar className="h-9 w-9">
+              <AvatarImage src={avatarSrc} alt={studentName} className={isDefaultAvatar ? 'object-contain transform scale-[2]' : 'object-cover'} />
+              <AvatarFallback className="bg-primary text-primary-foreground">
+                {getInitials(studentName)}
+              </AvatarFallback>
+            </Avatar>
+          </Link>
+        </div>
+
         {/* Right side - Language, Notifications and Profile */}
-        <div className="flex flex-row-reverse items-center gap-4">
+        <div className="hidden md:flex flex-row-reverse items-center gap-4">
           <div className="order-0">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>

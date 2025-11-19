@@ -24,6 +24,29 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, requiredRole,
   // When subscription is approved, we load allowedSections (featureId -> [sectionId])
   const [allowedSections, setAllowedSections] = React.useState<Record<string, string[]> | null>(null);
 
+  // Onboarding gate for teacher routes
+  const [needsOnboarding, setNeedsOnboarding] = React.useState<boolean>(false);
+  const [onboardingChecked, setOnboardingChecked] = React.useState<boolean>(false);
+  React.useEffect(() => {
+    const checkOnboarding = async () => {
+      try {
+        if (requiredRole !== 'teacher') { setNeedsOnboarding(false); setOnboardingChecked(true); return; }
+        const isOnboardingRoute = location.pathname.startsWith('/teacher-onboarding');
+        const isVerifyRoute = location.pathname.startsWith('/verify-teacher-email');
+        if (!user || user.role !== 'teacher' || isOnboardingRoute || isVerifyRoute) { setNeedsOnboarding(false); setOnboardingChecked(true); return; }
+        const snap = await getDoc(doc(db, 'teachers', user.uid));
+        const data: any = snap.exists() ? snap.data() : null;
+        const completed = !!data?.onboardingCompleted;
+        setNeedsOnboarding(!completed);
+      } catch {
+        setNeedsOnboarding(false);
+      } finally {
+        setOnboardingChecked(true);
+      }
+    };
+    checkOnboarding();
+  }, [user?.uid, requiredRole, location.pathname]);
+
   // Load trial duration from admin settings at top-level (hooks must not be conditional)
   const [trialMsFromSettings, setTrialMsFromSettings] = React.useState<number | null>(null);
   React.useEffect(() => {
@@ -371,6 +394,9 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, requiredRole,
     }
   }
 
+  if (onboardingChecked && needsOnboarding) {
+    return <Navigate to="/teacher-onboarding" replace />;
+  }
   return <>{children}</>;
 };
 

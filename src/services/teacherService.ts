@@ -99,6 +99,7 @@ export class TeacherService {
         subjectSpecialization: subjectSpecialization || '',
         photoURL: '',
         bio: '',
+        onboardingCompleted: false,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         isActive: true,

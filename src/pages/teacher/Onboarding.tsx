@@ -8,7 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useAuth } from "@/hooks/useAuth";
-import { UploadCloud, BadgeCheck, Clock } from "lucide-react";
+import { UploadCloud, BadgeCheck, Clock, Check, BookOpen, Atom, FlaskConical, Sigma, Languages, Globe } from "lucide-react";
 import { toast } from "sonner";
 import { db } from "@/firebase/config";
 import { doc, updateDoc } from "firebase/firestore";
@@ -20,11 +20,14 @@ const Onboarding = () => {
 
   const [step, setStep] = useState<number>(1);
   const [saving, setSaving] = useState(false);
+  const [errors, setErrors] = useState<{ fullName?: string; specialization?: string; experience?: string }>({});
 
   // Step 1: Personal info
   const [fullName, setFullName] = useState("");
   const [specialization, setSpecialization] = useState("");
   const [specializationCategory, setSpecializationCategory] = useState("");
+  const [phoneCountry, setPhoneCountry] = useState<string>('SA');
+  const [phoneNumber, setPhoneNumber] = useState<string>('');
   // Step 2: Featured profile
   const [photoBase64, setPhotoBase64] = useState<string>("");
   const [experienceYears, setExperienceYears] = useState<string>("");
@@ -34,11 +37,19 @@ const Onboarding = () => {
   const [logoBase64, setLogoBase64] = useState<string>("");
   const [phraseIndex, setPhraseIndex] = useState(0);
   const [animateOut, setAnimateOut] = useState(false);
+  const [animateIn, setAnimateIn] = useState(false);
+  const [selectedAvatar, setSelectedAvatar] = useState<string>("");
 
   useEffect(() => {
     if (!user?.uid) return;
     // Pre-fill with current profile data if any
     setFullName(user.profile?.fullName || "");
+    try {
+      const existingPhone: any = (user.profile as any)?.phoneNumber;
+      if (typeof existingPhone === 'string' && existingPhone.trim()) {
+        setPhoneNumber(existingPhone);
+      }
+    } catch {}
   }, [user?.uid]);
 
   useEffect(() => {
@@ -53,6 +64,8 @@ const Onboarding = () => {
       setTimeout(() => {
         setPhraseIndex((idx) => (idx + 1) % phrasesAr.length);
         setAnimateOut(false);
+        setAnimateIn(true);
+        setTimeout(() => { setAnimateIn(false); }, 20);
       }, 500);
     }, 3000);
     return () => clearInterval(interval);
@@ -89,23 +102,45 @@ const Onboarding = () => {
   };
 
   const saveStep = async (nextStep?: number) => {
-    if (!user?.uid) return;
-    setSaving(true);
-    try {
-      const ref = doc(db, 'teachers', user.uid);
-      const payload: any = { updatedAt: new Date() };
-      if (step === 1) {
-        payload.fullName = fullName.trim();
-        payload.subjectSpecialization = specialization || '';
-        payload.specializationCategory = specializationCategory || '';
-      } else if (step === 2) {
-        if (photoBase64) payload.photoURL = photoBase64;
-        if (experienceYears) payload.experienceYears = Number(experienceYears);
-        if (bio) payload.bio = bio;
-      } else if (step === 3) {
-        if (platformName) payload.platformName = platformName;
-        if (logoBase64) payload.brandLogoBase64 = logoBase64;
+  if (!user?.uid) return;
+  setSaving(true);
+  try {
+    const ref = doc(db, 'teachers', user.uid);
+    const payload: any = { updatedAt: new Date() };
+    if (step === 1) {
+      const errs: any = {};
+      if (!fullName.trim() || fullName.trim().length < 2) errs.fullName = language === 'ar' ? 'يرجى إدخال الاسم' : 'Please enter name';
+      if (!specialization) errs.specialization = language === 'ar' ? 'يرجى اختيار المادة' : 'Please select subject';
+      const maxLen = countryMaxLen[phoneCountry] || 10;
+      const normalizedLocal = (phoneNumber || '').replace(/[^\d]/g, '');
+      if (!normalizedLocal) errs.phone = language === 'ar' ? 'رقم الهاتف مطلوب' : 'Phone number is required';
+      if (normalizedLocal && !(normalizedLocal.length === maxLen || phoneNumber.startsWith('+'))) errs.phone = language === 'ar' ? 'تحقق من طول رقم الهاتف' : 'Check phone number length';
+      setErrors(errs);
+      if (Object.keys(errs).length > 0) { setSaving(false); return; }
+      payload.fullName = fullName.trim();
+      payload.subjectSpecialization = specialization || '';
+      payload.specializationCategory = specializationCategory || '';
+      const dial = countryDial[phoneCountry] || '';
+      const raw = (phoneNumber || '').trim();
+      let normalized = raw.replace(/[^+\d]/g, '');
+      if (!normalized.startsWith('+')) {
+        const local = normalized.replace(/^0+/, '');
+        if (dial) normalized = `+${dial}${local}`; else normalized = local;
       }
+      if (normalized) payload.phoneNumber = normalized;
+    } else if (step === 2) {
+      const errs: any = {};
+      if (!experienceYears) errs.experience = language === 'ar' ? 'يرجى اختيار الخبرة' : 'Please select experience';
+      if (!photoBase64) errs.photo = language === 'ar' ? 'يرجى رفع صورة أو اختيار افاتار' : 'Please upload a photo or choose an avatar';
+      setErrors(errs);
+      if (Object.keys(errs).length > 0) { setSaving(false); return; }
+      if (photoBase64) payload.photoURL = photoBase64;
+      if (experienceYears) payload.experienceYears = Number(experienceYears);
+      if (bio) payload.bio = bio;
+    } else if (step === 3) {
+      if (platformName) payload.platformName = platformName;
+      if (logoBase64) payload.brandLogoBase64 = logoBase64;
+    }
       await updateDoc(ref, payload);
       if (typeof nextStep === 'number') setStep(nextStep);
     } catch (e) {
@@ -117,7 +152,11 @@ const Onboarding = () => {
   };
 
   const finish = async () => {
+    if (!user?.uid) return;
     await saveStep();
+    try {
+      await updateDoc(doc(db, 'teachers', user.uid), { onboardingCompleted: true, updatedAt: new Date() });
+    } catch {}
     navigate('/teacher-dashboard');
   };
 
@@ -131,6 +170,21 @@ const Onboarding = () => {
       <div className="grid grid-cols-1 md:grid-cols-2 min-h-screen">
         <div className="flex items-center justify-center bg-white p-8">
           <div className="w-full max-w-xl">
+            <div className="flex justify-end mb-4">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  const next = language === 'ar' ? 'en' : 'ar';
+                  try { localStorage.setItem('language', next as any); } catch {}
+                  window.location.reload();
+                }}
+                className="flex items-center gap-2"
+              >
+                <Globe className="h-4 w-4" />
+                {language === 'ar' ? 'EN' : 'AR'}
+              </Button>
+            </div>
             <div className="mb-8">
               <h2 className="text-3xl font-bold mb-2">{language === 'ar' ? 'إعداد حساب المدرس' : 'Teacher Onboarding'}</h2>
               <p className="text-gray-500">{language === 'ar' ? 'أكمل البيانات لتخصيص منصتك التعليمية' : 'Complete the steps to personalize your teaching platform'}</p>
@@ -144,6 +198,31 @@ const Onboarding = () => {
                 <div>
                   <Label htmlFor="fullName">{language === 'ar' ? 'الاسم/الشهرة' : 'Name / Nickname'}</Label>
                   <Input id="fullName" value={fullName} onChange={(e) => setFullName(e.target.value)} className="h-12 rounded-lg shadow-sm border-gray-200 bg-white" />
+                  {errors.fullName && (<p className="text-red-600 text-xs mt-1">{errors.fullName}</p>)}
+                </div>
+                <div>
+                  <Label htmlFor="phone">{language === 'ar' ? 'رقم الهاتف' : 'Phone Number'}</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      id="phone"
+                      type="tel"
+                      value={phoneNumber}
+                      onChange={(e) => setPhoneNumber(e.target.value)}
+                      className="h-12 rounded-lg shadow-sm border-gray-200 bg-white flex-1"
+                      maxLength={(countryMaxLen[phoneCountry] || 10) + 4}
+                      placeholder={language === 'ar' ? 'ادخل رقم هاتفك فقط' : 'Enter your phone number only'}
+                    />
+                    <select
+                      value={phoneCountry}
+                      onChange={(e) => setPhoneCountry(e.target.value)}
+                      className="w-36 border border-gray-300 rounded-md px-2 py-2 bg-white"
+                    >
+                      {countryOptions.map((opt) => (
+                        <option key={opt.v} value={opt.v}>{`${flagEmoji(opt.v)} ${language === 'ar' ? opt.nAr : opt.nEn} (+${opt.d})`}</option>
+                      ))}
+                    </select>
+                  </div>
+                  {errors.phone && (<p className="text-red-600 text-xs mt-1">{errors.phone}</p>)}
                 </div>
                 <div>
                   <Label>{language === 'ar' ? 'التخصص (المادة الدراسية)' : 'Specialization (Subject)'}</Label>
@@ -193,6 +272,7 @@ const Onboarding = () => {
                       <SelectItem value="غير ذلك">{language === 'ar' ? 'غير ذلك' : 'Other'}</SelectItem>
                     </SelectContent>
                   </Select>
+                  {errors.specialization && (<p className="text-red-600 text-xs mt-1">{errors.specialization}</p>)}
                 </div>
               </div>
             )}
@@ -202,20 +282,49 @@ const Onboarding = () => {
                 <p className="text-sm text-muted-foreground">
                   {language === 'ar' ? 'قد تظهر هذه المعلومات في الصفحة الرئيسية إذا تم اختيارك كمدرس الشهر' : 'These details may appear on the homepage if selected as Teacher of the Month'}
                 </p>
-                <div className="space-y-2">
-                  <Label>{language === 'ar' ? 'الصورة الشخصية (اختياري)' : 'Profile Photo (Optional)'}</Label>
-                  <div className="group relative h-24 w-24 rounded-full overflow-hidden border border-gray-200 shadow-sm">
-                    <img src={photoBase64 || '/avatar-placeholder.png'} alt="avatar" className="h-full w-full object-cover" />
-                    <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                      <UploadCloud className="h-6 w-6 text-white" />
-                    </div>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      className="absolute inset-0 opacity-0 cursor-pointer"
-                      onChange={async (e) => { const f = e.target.files?.[0]; if (f) setPhotoBase64(await compressImageToBase64(f, 512, 0.8)); }}
-                    />
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <Label>{language === 'ar' ? 'الصورة الشخصية' : 'Profile Photo'}</Label>
+                    <span className="text-xs text-muted-foreground">
+                      {language === 'ar' ? 'اختر افاتار جاهز أو ارفع صورتك الخاصة' : 'Choose a ready avatar or upload your photo'}
+                    </span>
                   </div>
+                  <div className="flex items-center gap-4">
+                    <div className="group relative h-24 w-24 rounded-full overflow-hidden border border-gray-200 shadow-sm bg-white">
+                      {photoBase64 ? (
+                        <img src={photoBase64} alt="avatar" className="h-full w-full object-cover" />
+                      ) : null}
+                      <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                        <UploadCloud className="h-6 w-6 text-white" />
+                      </div>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="absolute inset-0 opacity-0 cursor-pointer"
+                        onChange={async (e) => { const f = e.target.files?.[0]; if (f) { const b64 = await compressImageToBase64(f, 512, 0.8); setPhotoBase64(b64); setSelectedAvatar(""); } }}
+                      />
+                    </div>
+                    <div className="flex items-center gap-6">
+                      {["/افاتار.png","/افاتار بنت.png"].map((av) => {
+                        const isSelected = selectedAvatar === av || (!selectedAvatar && photoBase64 === av);
+                        return (
+                          <div key={av} className="flex flex-col items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => { setSelectedAvatar(av); setPhotoBase64(av); }}
+                              className={`relative h-16 w-16 rounded-full overflow-hidden border ${isSelected ? 'border-[#ee7b3d]' : 'border-gray-200'} shadow-sm bg-white`}
+                            >
+                              <img src={av} alt="avatar option" className="h-full w-full object-cover" />
+                            </button>
+                            <div className={`h-4 w-4 rounded-full border ${isSelected ? 'bg-[#ee7b3d] border-[#ee7b3d]' : 'bg-white border-gray-300'} flex items-center justify-center` }>
+                              {isSelected && <Check className="h-3 w-3 text-white" />}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  {errors.photo && (<p className="text-red-600 text-xs mt-1">{errors.photo}</p>)}
                 </div>
                 <div>
                   <Label htmlFor="experienceYears">{language === 'ar' ? 'الخبرة' : 'Experience'}</Label>
@@ -238,6 +347,7 @@ const Onboarding = () => {
                       </button>
                     ))}
                   </div>
+                  {errors.experience && (<p className="text-red-600 text-xs mt-1">{errors.experience}</p>)}
                 </div>
                 <div>
                   <Label htmlFor="bio">{language === 'ar' ? 'السيرة الذاتية' : 'Bio'}</Label>
@@ -254,8 +364,10 @@ const Onboarding = () => {
                 </div>
                 <div className="space-y-2">
                   <Label>{language === 'ar' ? 'لوجو المنصة' : 'Platform Logo'}</Label>
-                  <div className="group relative h-24 w-24 rounded-full overflow-hidden border border-gray-200 shadow-sm">
-                    <img src={logoBase64 || '/Header-Logo.png'} alt="logo" className="h-full w-full object-contain bg-white" />
+                  <div className="group relative h-24 w-24 rounded-full overflow-hidden border border-gray-200 shadow-sm bg-white">
+                    {logoBase64 ? (
+                      <img src={logoBase64} alt="logo" className="h-full w-full object-contain" />
+                    ) : null}
                     <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                       <UploadCloud className="h-6 w-6 text-white" />
                     </div>
@@ -289,9 +401,26 @@ const Onboarding = () => {
           </div>
         </div>
 
-        <div className="relative bg-[#f5f7fb] p-8 flex items-center justify-center">
+        <div className="relative bg-[#f5f7fb] p-8 hidden md:flex items-center justify-center">
+          <div className="pointer-events-none">
+            <BookOpen className="absolute left-8 top-8 h-8 w-8 text-[#2c4656]/20" />
+            <Atom className="absolute right-10 top-20 h-10 w-10 text-[#2c4656]/15" />
+            <FlaskConical className="absolute left-1/3 bottom-10 h-9 w-9 text-[#2c4656]/20" />
+            <Sigma className="absolute right-1/4 bottom-16 h-8 w-8 text-[#2c4656]/15" />
+            <Languages className="absolute left-12 bottom-24 h-9 w-9 text-[#2c4656]/15" />
+            <BookOpen className="absolute left-24 top-32 h-6 w-6 text-[#2c4656]/20" />
+            <Atom className="absolute right-24 top-10 h-7 w-7 text-[#2c4656]/15" />
+            <FlaskConical className="absolute left-10 top-1/2 h-6 w-6 text-[#2c4656]/20" />
+            <Sigma className="absolute right-8 top-1/3 h-7 w-7 text-[#2c4656]/15" />
+            <Languages className="absolute left-1/4 top-16 h-6 w-6 text-[#2c4656]/15" />
+            <BookOpen className="absolute right-1/3 bottom-8 h-6 w-6 text-[#2c4656]/20" />
+            <Atom className="absolute left-1/2 bottom-20 h-5 w-5 text-[#2c4656]/15" />
+            <FlaskConical className="absolute right-16 bottom-6 h-6 w-6 text-[#2c4656]/20" />
+            <Sigma className="absolute left-20 bottom-14 h-5 w-5 text-[#2c4656]/15" />
+            <Languages className="absolute right-1/2 top-24 h-6 w-6 text-[#2c4656]/15" />
+          </div>
           <div className="text-center">
-            <div className={`text-3xl md:text-4xl font-extrabold text-[#2c4656] transition-all duration-500 ${animateOut ? '-translate-y-4 opacity-0' : 'translate-y-0 opacity-100'}`}>
+            <div className={`${language === 'ar' ? 'font-arabicBrand font-extrabold' : 'font-extrabold'} text-[#2c4656] transition-all duration-500 ${animateOut ? '-translate-y-5 opacity-0' : (animateIn ? 'translate-y-5 opacity-0' : 'translate-y-0 opacity-100')} text-4xl md:text-5xl`}>
               {language === 'ar' 
                 ? ['تعليم يليق بطموحك','منصة حديثة لرحلة نجاحك','دروس مصممة لتتقدم بثقة','ابدأ اليوم وصِل لأعلى أداء'][phraseIndex]
                 : ['Learn with confidence','A modern platform for your journey','Lessons designed for success','Start today and reach higher'][phraseIndex]}
@@ -301,6 +430,120 @@ const Onboarding = () => {
       </div>
     </div>
   );
+};
+
+const countryOptions = [
+  { v: 'SA', nAr: 'السعودية', nEn: 'Saudi Arabia', d: '966' },
+  { v: 'EG', nAr: 'مصر', nEn: 'Egypt', d: '20' },
+  { v: 'AE', nAr: 'الإمارات', nEn: 'United Arab Emirates', d: '971' },
+  { v: 'KW', nAr: 'الكويت', nEn: 'Kuwait', d: '965' },
+  { v: 'BH', nAr: 'البحرين', nEn: 'Bahrain', d: '973' },
+  { v: 'QA', nAr: 'قطر', nEn: 'Qatar', d: '974' },
+  { v: 'OM', nAr: 'عمان', nEn: 'Oman', d: '968' },
+  { v: 'JO', nAr: 'الأردن', nEn: 'Jordan', d: '962' },
+  { v: 'LB', nAr: 'لبنان', nEn: 'Lebanon', d: '961' },
+  { v: 'PS', nAr: 'فلسطين', nEn: 'Palestine', d: '970' },
+  { v: 'IQ', nAr: 'العراق', nEn: 'Iraq', d: '964' },
+  { v: 'SY', nAr: 'سوريا', nEn: 'Syria', d: '963' },
+  { v: 'MA', nAr: 'المغرب', nEn: 'Morocco', d: '212' },
+  { v: 'DZ', nAr: 'الجزائر', nEn: 'Algeria', d: '213' },
+  { v: 'TN', nAr: 'تونس', nEn: 'Tunisia', d: '216' },
+  { v: 'LY', nAr: 'ليبيا', nEn: 'Libya', d: '218' },
+  { v: 'SD', nAr: 'السودان', nEn: 'Sudan', d: '249' },
+  { v: 'YE', nAr: 'اليمن', nEn: 'Yemen', d: '967' },
+  { v: 'US', nAr: 'الولايات المتحدة', nEn: 'United States', d: '1' },
+  { v: 'GB', nAr: 'المملكة المتحدة', nEn: 'United Kingdom', d: '44' },
+  { v: 'DE', nAr: 'ألمانيا', nEn: 'Germany', d: '49' },
+  { v: 'FR', nAr: 'فرنسا', nEn: 'France', d: '33' },
+  { v: 'ES', nAr: 'إسبانيا', nEn: 'Spain', d: '34' },
+  { v: 'IT', nAr: 'إيطاليا', nEn: 'Italy', d: '39' },
+  { v: 'TR', nAr: 'تركيا', nEn: 'Turkey', d: '90' },
+  { v: 'IN', nAr: 'الهند', nEn: 'India', d: '91' },
+  { v: 'PK', nAr: 'باكستان', nEn: 'Pakistan', d: '92' },
+  { v: 'BD', nAr: 'بنغلاديش', nEn: 'Bangladesh', d: '880' },
+  { v: 'ID', nAr: 'إندونيسيا', nEn: 'Indonesia', d: '62' },
+  { v: 'PH', nAr: 'الفلبين', nEn: 'Philippines', d: '63' },
+  { v: 'MY', nAr: 'ماليزيا', nEn: 'Malaysia', d: '60' },
+  { v: 'SG', nAr: 'سنغافورة', nEn: 'Singapore', d: '65' },
+  { v: 'CN', nAr: 'الصين', nEn: 'China', d: '86' },
+  { v: 'JP', nAr: 'اليابان', nEn: 'Japan', d: '81' },
+  { v: 'KR', nAr: 'كوريا الجنوبية', nEn: 'South Korea', d: '82' },
+  { v: 'RU', nAr: 'روسيا', nEn: 'Russia', d: '7' },
+  { v: 'UA', nAr: 'أوكرانيا', nEn: 'Ukraine', d: '380' },
+  { v: 'SE', nAr: 'السويد', nEn: 'Sweden', d: '46' },
+  { v: 'NO', nAr: 'النرويج', nEn: 'Norway', d: '47' },
+  { v: 'DK', nAr: 'الدنمارك', nEn: 'Denmark', d: '45' },
+  { v: 'NL', nAr: 'هولندا', nEn: 'Netherlands', d: '31' },
+  { v: 'BE', nAr: 'بلجيكا', nEn: 'Belgium', d: '32' },
+  { v: 'CH', nAr: 'سويسرا', nEn: 'Switzerland', d: '41' },
+  { v: 'AT', nAr: 'النمسا', nEn: 'Austria', d: '43' },
+  { v: 'GR', nAr: 'اليونان', nEn: 'Greece', d: '30' },
+  { v: 'PT', nAr: 'البرتغال', nEn: 'Portugal', d: '351' },
+  { v: 'IE', nAr: 'إيرلندا', nEn: 'Ireland', d: '353' },
+  { v: 'ZA', nAr: 'جنوب أفريقيا', nEn: 'South Africa', d: '27' },
+  { v: 'NG', nAr: 'نيجيريا', nEn: 'Nigeria', d: '234' },
+  { v: 'KE', nAr: 'كينيا', nEn: 'Kenya', d: '254' },
+];
+
+const countryDial: Record<string, string> = countryOptions.reduce((acc, c) => { acc[c.v] = c.d; return acc; }, {} as Record<string, string>);
+const countryMaxLen: Record<string, number> = {
+  SA: 9,
+  EG: 10,
+  AE: 9,
+  KW: 8,
+  BH: 8,
+  QA: 8,
+  OM: 8,
+  JO: 9,
+  LB: 8,
+  PS: 9,
+  IQ: 10,
+  SY: 9,
+  MA: 9,
+  DZ: 9,
+  TN: 8,
+  LY: 9,
+  SD: 9,
+  YE: 9,
+  US: 10,
+  GB: 10,
+  DE: 10,
+  FR: 9,
+  ES: 9,
+  IT: 10,
+  TR: 10,
+  IN: 10,
+  PK: 10,
+  BD: 10,
+  ID: 10,
+  PH: 10,
+  MY: 10,
+  SG: 8,
+  CN: 11,
+  JP: 10,
+  KR: 10,
+  RU: 10,
+  UA: 9,
+  SE: 9,
+  NO: 8,
+  DK: 8,
+  NL: 9,
+  BE: 9,
+  CH: 9,
+  AT: 10,
+  GR: 10,
+  PT: 9,
+  IE: 9,
+  ZA: 9,
+  NG: 10,
+  KE: 9,
+};
+
+const flagEmoji = (cc: string) => {
+  const up = cc.trim().toUpperCase();
+  if (up.length !== 2) return '';
+  const codePoints = Array.from(up).map((ch) => 127397 + ch.charCodeAt(0));
+  return String.fromCodePoint(...codePoints);
 };
 
 export default Onboarding;

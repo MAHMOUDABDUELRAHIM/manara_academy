@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { TeacherService } from "@/services/teacherService";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import { Globe, BookOpen, Users, Award, TrendingUp } from "lucide-react";
@@ -16,7 +17,7 @@ const Login = () => {
   const [isSuspended, setIsSuspended] = useState(false);
   const [isUnavailable, setIsUnavailable] = useState(false);
   const { language, t } = useLanguage();
-  const { login, loginWithGoogle, loginWithFacebook, loading, error } = useAuth();
+  const { login, loginWithGoogle, loginWithFacebook, registerTeacherWithGoogle, loading, error } = useAuth();
   const navigate = useNavigate();
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -27,7 +28,17 @@ const Login = () => {
       
       // Main login is for teachers/admins; students should use student-login via invite
       if (user?.role === 'teacher') {
-        navigate('/teacher-dashboard');
+        try {
+          const t = await TeacherService.getTeacherByUid(user.uid);
+          const completed = !!(t as any)?.onboardingCompleted;
+          if (!completed) {
+            navigate('/teacher-onboarding');
+          } else {
+            navigate('/teacher-dashboard');
+          }
+        } catch {
+          navigate('/teacher-dashboard');
+        }
       } else if (user?.role === 'admin') {
         navigate('/admin-dashboard');
       } else {
@@ -59,7 +70,16 @@ const Login = () => {
     try {
       let user;
       if (provider === 'google') {
-        user = await loginWithGoogle();
+        try {
+          user = await loginWithGoogle();
+        } catch (err: any) {
+          if (err?.message === 'account_not_available') {
+            toast.error(language === 'ar' ? 'هذا الحساب غير موجود، قم بإنشاء حسابك' : 'This account does not exist, please create your account');
+            return;
+          } else {
+            throw err;
+          }
+        }
       } else if (provider === 'facebook') {
         user = await loginWithFacebook();
       }
@@ -67,7 +87,17 @@ const Login = () => {
       
       // Main login social is for teachers; students use student-login
       if (user?.role === 'teacher') {
-        navigate('/teacher-dashboard');
+        try {
+          const t = await TeacherService.getTeacherByUid(user.uid);
+          const completed = !!(t as any)?.onboardingCompleted;
+          if (!completed) {
+            navigate('/teacher-onboarding');
+          } else {
+            navigate('/teacher-dashboard');
+          }
+        } catch {
+          navigate('/teacher-dashboard');
+        }
       } else if (user?.role === 'admin') {
         navigate('/admin-dashboard');
       } else {
@@ -83,8 +113,8 @@ const Login = () => {
       } else if (error.message === 'account_not_available') {
         toast.error(
           language === 'ar' 
-            ? 'هذا الحساب غير متوفر. يرجى التواصل مع الدعم الفني.' 
-            : 'This account is not available. Please contact support.'
+            ? 'هذا الحساب غير موجود، قم بإنشاء حسابك' 
+            : 'This account does not exist, please create your account'
         );
       } else {
         toast.error(language === 'ar' ? 'خطأ في تسجيل الدخول' : 'Login failed');
@@ -246,9 +276,10 @@ const Login = () => {
               </div>
             </div>
             
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3">
               <Button
                 variant="outline"
+                size="lg"
                 onClick={() => handleSocialLogin('google')}
                 disabled={loading}
                 className="w-full"
@@ -273,29 +304,12 @@ const Login = () => {
                 </svg>
                 {t('google')}
               </Button>
-              
-              <Button
-                variant="outline"
-                onClick={() => handleSocialLogin('facebook')}
-                disabled={loading}
-                className="w-full"
-              >
-                <svg className="mr-2 h-4 w-4" fill="#1877F2" viewBox="0 0 24 24">
-                  <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
-                </svg>
-                {t('facebook')}
-              </Button>
             </div>
             </CardContent>
             <CardFooter className="flex flex-col space-y-2">
               <div className="text-sm text-center text-muted-foreground">
-                {t('dontHaveAccount')}{" "}
-                <Link to="/register/student" className="text-accent hover:underline font-medium">
-                  {t('registerAsStudent')}
-                </Link>
-                {" / "}
                 <Link to="/register/teacher" className="text-accent hover:underline font-medium">
-                  {t('registerAsTeacher')}
+                  {language === 'ar' ? 'إنشاء حساب' : 'Create Account'}
                 </Link>
               </div>
             </CardFooter>

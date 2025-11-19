@@ -1498,20 +1498,24 @@ export const TeacherDashboard = () => {
           </div>
         </DialogContent>
       </Dialog>
-      <DashboardHeader fixed studentName={displayTeacherName} notificationCount={notificationCount} notifications={notifications} newNotificationPreview={newNotifPreview} onPreviewClear={() => setNewNotifPreview(null)} defaultOpenNotifications={showWelcomeTrial} onNotificationsOpen={async () => {
-        try {
-          const uid = user?.uid || (user as any)?.id;
-          if (uid) await NotificationService.markAllAsRead(uid);
-        } catch {}
-        setNotificationCount(0);
-        setNewNotifPreview(null);
-      }} />
+      <DashboardHeader
+        fixed
+        studentName={displayTeacherName}
+        notificationCount={notificationCount}
+        notifications={notifications}
+        newNotificationPreview={newNotifPreview}
+        onPreviewClear={() => setNewNotifPreview(null)}
+        defaultOpenNotifications={showWelcomeTrial}
+        onNotificationsOpen={() => {
+          try { /* لا نقوم بتعليم الإشعارات كمقروء تلقائيًا */ } catch {}
+        }}
+      />
       
-      <div className="flex min-h-[calc(100vh-4rem)]">
+      <div className="flex flex-col md:flex-row min-h-[calc(100vh-4rem)]">
         <TeacherSidebar isSubscriptionApproved={isSubscriptionApproved} />
         
         {/* Main Content */}
-        <main className={`md:ml-64 flex-1 p-6 overflow-y-auto`}>
+        <main className={`md:ml-64 flex-1 p-4 sm:p-6 overflow-y-auto`}>
           {/* Welcome Section (moved above pricing, centered) */}
           <div className="mb-8 text-center">
             <h1 className="text-3xl md:text-4xl font-bold text-foreground mb-2">
@@ -1541,7 +1545,7 @@ export const TeacherDashboard = () => {
 
           {/* Stats Cards */}
           {isSubscriptionApproved && (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6 mb-8">
             <Card className="bg-white border border-gray-200 shadow-sm rounded-xl">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">
@@ -1690,7 +1694,7 @@ export const TeacherDashboard = () => {
                 {t('pricingDescription')}
               </p>
             </div>
-            <div className="grid md:grid-cols-3 gap-6 items-stretch">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6 items-stretch">
               {plans.map((plan, index) => (
                 <Card key={index} className={`h-full flex flex-col bg-white border border-gray-200 shadow-sm rounded-xl ${plan.popular ? 'border-[#ee7b3d]' : ''}`}>
                   {plan.popular && (
@@ -1776,7 +1780,7 @@ export const TeacherDashboard = () => {
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <div className="grid md:grid-cols-2 gap-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
                     {/* Selected plan features */}
                     <div>
                       <h4 className="text-sm font-medium mb-3">
@@ -2004,7 +2008,7 @@ export const TeacherDashboard = () => {
                     </Badge>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-4">
                     <div className="bg-white border border-gray-200 rounded-xl p-4">
                       <div className="text-sm text-muted-foreground">{language === 'ar' ? 'الدورات المسجل بها' : 'Enrolled Courses'}</div>
                       <div className="text-2xl font-bold">{studentCoursesForTeacher.length}</div>
@@ -2019,7 +2023,7 @@ export const TeacherDashboard = () => {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
                     <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-3 text-sm text-gray-700">
                       <div className="flex items-center justify-between">
                         <span>{language === 'ar' ? 'تاريخ التسجيل' : 'Registered At'}</span>
@@ -2109,7 +2113,7 @@ export const TeacherDashboard = () => {
                   ) : courses.length === 0 ? (
                     <EmptyCoursesState />
                   ) : (
-                    <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4">
                       {courses.map((course) => {
                         const students = courseStudentsCount[course.id] ?? 0;
                         const earnings = Math.round((course.price || 0) * students);
@@ -2160,7 +2164,7 @@ export const TeacherDashboard = () => {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-4">
                   <div className="text-center p-4 border rounded-lg">
                     <div className="w-12 h-12 mx-auto mb-3 bg-primary/10 rounded-full flex items-center justify-center">
                       <Plus className="h-6 w-6 text-primary" />

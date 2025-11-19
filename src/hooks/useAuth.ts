@@ -11,7 +11,7 @@ import {
   signInWithPopup,
   updateProfile
 } from 'firebase/auth';
-import { doc, setDoc, getDoc } from 'firebase/firestore';
+import { doc, setDoc, getDoc, updateDoc } from 'firebase/firestore';
 import { auth, db } from '@/firebase/config';
 import { syncCurrentUserToFirestore } from '@/utils/syncUsers';
 import { StudentService } from '@/services/studentService';
@@ -443,6 +443,74 @@ export const useAuth = () => {
     }
   };
 
+  const registerTeacherWithGoogle = async () => {
+    try {
+      setError(null);
+      setLoading(true);
+      try { localStorage.setItem('pendingRole', 'teacher'); } catch {}
+      const provider = new GoogleAuthProvider();
+      const result = await signInWithPopup(auth, provider);
+
+      let userProfile: UserProfile = {};
+      let role: 'student' | 'teacher' | 'admin' | undefined;
+
+      const existingTeacher = await TeacherService.getTeacherByUid(result.user.uid);
+      if (existingTeacher) {
+        if ((existingTeacher as any).isActive === false) {
+          await signOut(auth);
+          throw new Error('account_suspended');
+        }
+        userProfile = {
+          fullName: existingTeacher.fullName,
+          role: 'teacher',
+          subjectSpecialization: existingTeacher.subjectSpecialization,
+          emailVerified: !!(auth.currentUser?.emailVerified) || !!(existingTeacher as any).emailVerified,
+          createdAt: (existingTeacher as any).createdAt || undefined,
+        };
+        role = 'teacher';
+      } else {
+        const created = await TeacherService.createTeacherProfile(
+          result.user.uid,
+          result.user.displayName || '',
+          result.user.email || '',
+          undefined,
+          undefined
+        );
+        try { await updateDoc(doc(db, 'teachers', result.user.uid), { emailVerified: true, updatedAt: new Date().toISOString() }); } catch {}
+        userProfile = {
+          fullName: created.fullName,
+          role: 'teacher',
+          subjectSpecialization: created.subjectSpecialization,
+          emailVerified: !!(auth.currentUser?.emailVerified) || true,
+          createdAt: created.createdAt,
+        };
+        role = 'teacher';
+      }
+
+      setUser({
+        uid: result.user.uid,
+        email: result.user.email,
+        displayName: userProfile.fullName || result.user.displayName,
+        photoURL: result.user.photoURL,
+        role: role,
+        profile: userProfile,
+      });
+
+      try { if (role === 'teacher') localStorage.removeItem('pendingRole'); } catch {}
+
+      return {
+        ...result.user,
+        role: role,
+        profile: userProfile,
+      };
+    } catch (error: any) {
+      setError(error.message);
+      throw error;
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const loginWithFacebook = async () => {
     try {
       setError(null);
@@ -510,5 +578,6 @@ export const useAuth = () => {
     resetPassword,
     loginWithGoogle,
     loginWithFacebook,
+    registerTeacherWithGoogle,
   };
 };

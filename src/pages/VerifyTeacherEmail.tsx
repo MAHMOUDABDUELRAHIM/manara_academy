@@ -25,7 +25,7 @@ const VerifyTeacherEmail: React.FC = () => {
     const init = async () => {
       if (!auth.currentUser || !email) return;
       if (auth.currentUser.emailVerified) {
-        navigate('/teacher-dashboard');
+        navigate('/teacher-onboarding');
         return;
       }
       try {
@@ -61,7 +61,7 @@ const VerifyTeacherEmail: React.FC = () => {
                 emailVerifiedAt: new Date()
               });
             } catch {}
-            navigate('/teacher-dashboard');
+            navigate('/teacher-onboarding');
           }
         } finally {
           setChecking(false);
@@ -83,7 +83,7 @@ const VerifyTeacherEmail: React.FC = () => {
               });
             } catch {}
             clearInterval(interval);
-            navigate('/teacher-dashboard');
+            navigate('/teacher-onboarding');
           }
         }
       } finally {
@@ -123,7 +123,7 @@ const VerifyTeacherEmail: React.FC = () => {
             emailVerifiedAt: new Date()
           });
         } catch {}
-        navigate('/teacher-dashboard');
+        navigate('/teacher-onboarding');
       } else {
         toast.info(language === 'ar' ? 'لم يتم التأكيد بعد. افحص بريدك.' : 'Not verified yet. Check your inbox.');
       }

@@ -115,26 +115,7 @@ All colors MUST be HSL.
     @apply bg-background text-foreground;
   }
 
-  /* Force LTR direction for all elements to maintain consistent layout */
-  * {
-    direction: ltr !important;
-  }
-
-  /* Ensure icons and text maintain LTR direction */
-  svg, .lucide, [data-lucide] {
-    direction: ltr !important;
-  }
-
-  /* Force LTR for form elements */
-  input, textarea, select, button {
-    direction: ltr !important;
-    text-align: left !important;
-  }
-
-  /* Force LTR for navigation and header elements */
-  nav, header, .header {
-    direction: ltr !important;
-  }
+  /* Direction handled per-page via `dir` attribute. Remove global LTR enforcement. */
 }
 
 /* Modern Light Theme overrides (HSL values) */

@@ -1,15 +1,10 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from "react-router-dom";
-import { Header } from "@/components/Header";
-import { Footer } from "@/components/Footer";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { AlertCircle } from "lucide-react";
+import { AlertCircle, Eye, EyeOff, Globe, BookOpen, Users, Award, TrendingUp } from "lucide-react";
 import { useLanguage } from '@/contexts/LanguageContext';
-import { PasswordStrengthIndicator } from '@/components/PasswordStrengthIndicator';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
 import { auth } from '@/firebase/config';
@@ -18,64 +13,48 @@ import { sendEmailVerification } from 'firebase/auth';
 const TeacherRegister = () => {
   const { language, t } = useLanguage();
   const navigate = useNavigate();
-  const { register, loading } = useAuth();
+  const { register, loading, loginWithFacebook } = useAuth();
   const [formData, setFormData] = useState({
     fullName: "",
     email: "",
     password: "",
     confirmPassword: "",
-    subjectSpecialization: "",
+    website: "",
     phoneNumber: "",
   });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
-
-  const subjects = [
-    { key: "mathematics", value: "Mathematics" },
-    { key: "physics", value: "Physics" },
-    { key: "chemistry", value: "Chemistry" },
-    { key: "biology", value: "Biology" },
-    { key: "computerScience", value: "Computer Science" },
-    { key: "englishLanguage", value: "English Language" },
-    { key: "arabicLanguage", value: "Arabic Language" },
-    { key: "history", value: "History" },
-    { key: "geography", value: "Geography" },
-    { key: "economics", value: "Economics" },
-    { key: "philosophy", value: "Philosophy" },
-    { key: "psychology", value: "Psychology" },
-    { key: "artDesign", value: "Art & Design" },
-    { key: "music", value: "Music" },
-    { key: "physicalEducation", value: "Physical Education" },
-    { key: "other", value: "Other" }
-  ];
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [agree, setAgree] = useState(false);
 
   const validateForm = () => {
     const newErrors: Record<string, string> = {};
 
     if (!formData.fullName.trim()) {
-      newErrors.fullName = "Full name is required";
+      newErrors.fullName = language === 'ar' ? 'الاسم مطلوب' : 'Full name is required';
     }
 
     if (!formData.email.trim()) {
-      newErrors.email = "Email is required";
+      newErrors.email = language === 'ar' ? 'البريد الإلكتروني مطلوب' : "Email is required";
     } else if (!/\S+@\S+\.\S+/.test(formData.email)) {
-      newErrors.email = "Please enter a valid email address";
+      newErrors.email = language === 'ar' ? 'الرجاء إدخال بريد إلكتروني صحيح' : "Please enter a valid email address";
     }
 
     if (!formData.password) {
-      newErrors.password = "Password is required";
+      newErrors.password = language === 'ar' ? 'كلمة المرور مطلوبة' : "Password is required";
     } else if (formData.password.length < 8) {
-      newErrors.password = "Password must be at least 8 characters long";
+      newErrors.password = language === 'ar' ? 'يجب أن تكون كلمة المرور 8 أحرف على الأقل' : "Password must be at least 8 characters long";
     }
 
     if (!formData.confirmPassword) {
-      newErrors.confirmPassword = "Please confirm your password";
+      newErrors.confirmPassword = language === 'ar' ? 'يرجى تأكيد كلمة المرور' : "Please confirm your password";
     } else if (formData.password !== formData.confirmPassword) {
-      newErrors.confirmPassword = "Passwords do not match";
+      newErrors.confirmPassword = language === 'ar' ? 'كلمتا المرور غير متطابقتين' : "Passwords do not match";
     }
 
-    if (!formData.subjectSpecialization) {
-      newErrors.subjectSpecialization = "Please select your subject specialization";
+    if (!agree) {
+      newErrors.agree = language === 'ar' ? 'يجب الموافقة على الشروط والسياسة' : "You must agree to the terms and privacy policy";
     }
 
     setErrors(newErrors);
@@ -94,9 +73,8 @@ const TeacherRegister = () => {
 
         // Register teacher with Firebase
         await register(formData.email, formData.password, {
-          fullName: formData.fullName,
+          fullName: formData.fullName.trim(),
           role: 'teacher',
-          subjectSpecialization: formData.subjectSpecialization,
           phoneNumber: formData.phoneNumber,
         });
         
@@ -142,9 +120,10 @@ const TeacherRegister = () => {
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
+    const nextValue = name === 'phoneNumber' ? value.replace(/[^0-9]/g, '') : value;
     setFormData({
       ...formData,
-      [name]: value,
+      [name]: nextValue,
     });
     
     // Clear error when user starts typing
@@ -156,186 +135,133 @@ const TeacherRegister = () => {
     }
   };
 
-  const handleSelectChange = (value: string) => {
-    setFormData({
-      ...formData,
-      subjectSpecialization: value,
-    });
-    
-    // Clear error when user selects
-    if (errors.subjectSpecialization) {
-      setErrors({
-        ...errors,
-        subjectSpecialization: "",
-      });
-    }
-  };
+  const Feature = ({ icon: Icon, title, desc }: { icon: any; title: string; desc: string }) => (
+    <div className="flex items-start gap-3 text-white">
+      <Icon className="h-5 w-5 text-[#F59E0B]" />
+      <div>
+        <div className="font-semibold">{title}</div>
+        <div className="text-white/80 text-sm">{desc}</div>
+      </div>
+    </div>
+  );
 
   return (
-    <div className="min-h-screen flex flex-col bg-background" dir={language === 'ar' ? 'rtl' : 'ltr'}>
-      <Header />
-      
-      <main className="flex-1 flex items-center justify-center px-4 py-12">
-        <Card className="w-full max-w-md shadow-lg">
-          <CardHeader className="space-y-1">
-            <CardTitle className="text-2xl font-heading font-bold text-center text-foreground">
-              {t('teacherRegisterTitle')}
-            </CardTitle>
-            <CardDescription className="text-center text-muted-foreground">
-              {t('teacherRegisterDescription')}
-            </CardDescription>
-          </CardHeader>
-          
-          <CardContent>
+    <div className="min-h-screen" dir={language === 'ar' ? 'rtl' : 'ltr'}>
+      <div className="fixed top-4 right-4 z-50">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => {
+            const next = language === 'ar' ? 'en' : 'ar';
+            try { localStorage.setItem('language', next as any); } catch {}
+            window.location.reload();
+          }}
+          className="flex items-center gap-2"
+        >
+          <Globe className="h-4 w-4" />
+          {language === 'ar' ? 'EN' : 'AR'}
+        </Button>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 min-h-screen">
+        <div className="relative bg-[#0b2a56] text-white p-8 flex items-center">
+          <div className="max-w-lg space-y-6">
+            <h2 className="text-2xl font-bold">
+              {language === 'ar' ? 'منصتك التعليمية في دقائق' : 'Your teaching platform in minutes'}
+            </h2>
+            <p className="text-white/80">
+              {language === 'ar' ? 'أنشئ دوراتك، ادعُ طلابك، واعرض تقدمهم بسهولة.' : 'Create courses, invite students, and track progress effortlessly.'}
+            </p>
+            <div className="space-y-4">
+              <Feature icon={BookOpen} title={language === 'ar' ? 'إنشاء الدورات' : 'Course Creation'} desc={language === 'ar' ? 'صمم دروسًا تفاعلية بمحتوى متنوع.' : 'Design interactive lessons with rich content.'} />
+              <Feature icon={Users} title={language === 'ar' ? 'إدارة الطلاب' : 'Student Management'} desc={language === 'ar' ? 'ادعُ واربِط الطلاب وتابع مشاركتهم.' : 'Invite and link students, track engagement.'} />
+              <Feature icon={Award} title={language === 'ar' ? 'الشهادات' : 'Certificates'} desc={language === 'ar' ? 'امنح الطلاب شهادات بعد إتمام الدورات.' : 'Award certificates upon course completion.'} />
+              <Feature icon={TrendingUp} title={language === 'ar' ? 'تحليلات التقدم' : 'Progress Analytics'} desc={language === 'ar' ? 'راقب أداء طلابك عبر لوحة واضحة.' : 'Monitor student performance with clear dashboards.'} />
+            </div>
+          </div>
+        </div>
+        <div className="flex items-center justify-center bg-white p-8">
+          <div className="w-full max-w-md">
+            <h2 className="text-3xl font-bold mb-2">{t('teacherRegisterTitle')}</h2>
+            <p className="text-gray-500 mb-6">{t('teacherRegisterDescription')}</p>
             <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="fullName" className="text-sm font-medium">
-                  {t('fullName')}
-                </Label>
-                <Input
-                  id="fullName"
-                  name="fullName"
-                  type="text"
-                  placeholder={t('enterFullName')}
-                  value={formData.fullName}
-                  onChange={handleChange}
-                  className={errors.fullName ? "border-destructive" : ""}
-                />
+              <div>
+                <Label htmlFor="fullName">{t('fullName')}</Label>
+                <Input id="fullName" name="fullName" type="text" value={formData.fullName} onChange={handleChange} placeholder={t('enterFullName')} className={`h-12 rounded-lg shadow-sm ${errors.fullName ? 'border-destructive' : 'border-gray-200'} bg-white`} />
                 {errors.fullName && (
-                  <p className="text-sm text-destructive flex items-center gap-1">
-                    <AlertCircle className="h-4 w-4" />
-                    {errors.fullName}
-                  </p>
+                  <p className="text-sm text-destructive flex items-center gap-1 mt-1"><AlertCircle className="h-4 w-4" />{errors.fullName}</p>
                 )}
               </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="email" className="text-sm font-medium">
-                  {t('email')}
-                </Label>
-                <Input
-                  id="email"
-                  name="email"
-                  type="email"
-                  placeholder={t('enterEmail')}
-                  value={formData.email}
-                  onChange={handleChange}
-                  className={errors.email ? "border-destructive" : ""}
-                />
+              <div>
+                <Label htmlFor="email">{t('email')}</Label>
+                <Input id="email" name="email" type="email" value={formData.email} onChange={handleChange} placeholder={t('enterEmail')} className={`h-12 rounded-lg shadow-sm ${errors.email ? 'border-destructive' : 'border-gray-200'} bg-white`} />
                 {errors.email && (
-                  <p className="text-sm text-destructive flex items-center gap-1">
-                    <AlertCircle className="h-4 w-4" />
-                    {errors.email}
-                  </p>
+                  <p className="text-sm text-destructive flex items-center gap-1 mt-1"><AlertCircle className="h-4 w-4" />{errors.email}</p>
                 )}
               </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="password" className="text-sm font-medium">
-                  {t('password')}
-                </Label>
-                <Input
-                  id="password"
-                  name="password"
-                  type="password"
-                  placeholder={t('createStrongPassword')}
-                  value={formData.password}
-                  onChange={handleChange}
-                  className={errors.password ? "border-destructive" : ""}
-                />
-                <PasswordStrengthIndicator password={formData.password} />
+              
+              <div>
+                <Label htmlFor="password">{t('password')}</Label>
+                <div className="relative">
+                  <Input id="password" name="password" type={showPassword ? 'text' : 'password'} value={formData.password} onChange={handleChange} className={`h-12 rounded-lg shadow-sm ${errors.password ? 'border-destructive pr-10' : 'border-gray-200 pr-10'} bg-white`} />
+                  <Button type="button" variant="ghost" size="sm" className="absolute right-0 top-0 h-full px-3 hover:bg-transparent" onClick={() => setShowPassword(!showPassword)}>
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </Button>
+                </div>
                 {errors.password && (
-                  <p className="text-sm text-destructive flex items-center gap-1">
-                    <AlertCircle className="h-4 w-4" />
-                    {errors.password}
-                  </p>
+                  <p className="text-sm text-destructive flex items-center gap-1 mt-1"><AlertCircle className="h-4 w-4" />{errors.password}</p>
                 )}
               </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="confirmPassword" className="text-sm font-medium">
-                  {t('confirmPassword')}
-                </Label>
-                <Input
-                  id="confirmPassword"
-                  name="confirmPassword"
-                  type="password"
-                  placeholder={t('confirmYourPassword')}
-                  value={formData.confirmPassword}
-                  onChange={handleChange}
-                  className={errors.confirmPassword ? "border-destructive" : ""}
-                />
+              <div>
+                <Label htmlFor="confirmPassword">{t('confirmPassword')}</Label>
+                <div className="relative">
+                  <Input id="confirmPassword" name="confirmPassword" type={showConfirmPassword ? 'text' : 'password'} value={formData.confirmPassword} onChange={handleChange} className={`h-12 rounded-lg shadow-sm ${errors.confirmPassword ? 'border-destructive pr-10' : 'border-gray-200 pr-10'} bg-white`} />
+                  <Button type="button" variant="ghost" size="sm" className="absolute right-0 top-0 h-full px-3 hover:bg-transparent" onClick={() => setShowConfirmPassword(!showConfirmPassword)}>
+                    {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </Button>
+                </div>
                 {errors.confirmPassword && (
-                  <p className="text-sm text-destructive flex items-center gap-1">
-                    <AlertCircle className="h-4 w-4" />
-                    {errors.confirmPassword}
-                  </p>
+                  <p className="text-sm text-destructive flex items-center gap-1 mt-1"><AlertCircle className="h-4 w-4" />{errors.confirmPassword}</p>
                 )}
               </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="phoneNumber" className="text-sm font-medium">
-                  {t('teacherPhone')}
-                </Label>
-                <Input
-                  id="phoneNumber"
-                  name="phoneNumber"
-                  type="tel"
-                  placeholder={t('enterTeacherPhone')}
-                  value={formData.phoneNumber}
-                  onChange={handleChange}
-                />
+              <div>
+                <Label htmlFor="phoneNumber">{t('teacherPhone')}</Label>
+                <Input id="phoneNumber" name="phoneNumber" type="tel" inputMode="numeric" pattern="[0-9]*" value={formData.phoneNumber} onChange={handleChange} placeholder={t('enterTeacherPhone')} className="h-12 rounded-lg shadow-sm border-gray-200 bg-white" />
               </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="subjectSpecialization" className="text-sm font-medium">
-                  {t('subjectSpecialization')}
-                </Label>
-                <Select onValueChange={handleSelectChange} value={formData.subjectSpecialization}>
-                  <SelectTrigger className={errors.subjectSpecialization ? "border-destructive" : ""}>
-                    <SelectValue placeholder={t('selectSubject')} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {subjects.map((subject) => (
-                      <SelectItem key={subject.key} value={subject.value}>
-                        {t(subject.key)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {errors.subjectSpecialization && (
-                  <p className="text-sm text-destructive flex items-center gap-1">
-                    <AlertCircle className="h-4 w-4" />
-                    {errors.subjectSpecialization}
-                  </p>
-                )}
+              <div>
+                <Label htmlFor="website">{language === 'ar' ? 'الموقع الإلكتروني' : 'Website'}</Label>
+                <Input id="website" name="website" type="text" value={formData.website} onChange={handleChange} placeholder={language === 'ar' ? 'اختياري' : 'Optional'} className="h-12 rounded-lg shadow-sm border-gray-200 bg-white" />
               </div>
-
-              <Button 
-                type="submit" 
-                className="w-full bg-orange-500 hover:bg-orange-600 text-white font-medium py-2 px-4 rounded-md transition-colors"
-                disabled={loading}
-              >
-                {loading 
-                  ? (language === 'ar' ? 'جاري إنشاء الحساب...' : 'Creating account...') 
-                  : t('registerAsTeacherButton')
-                }
+              <div className="flex items-start gap-2">
+                <input id="agree" type="checkbox" checked={agree} onChange={(e) => setAgree(e.target.checked)} className="mt-1" />
+                <label htmlFor="agree" className="text-sm text-gray-600">
+                  {language === 'ar' ? 'أوافق على ' : 'I agree to '} 
+                  <a href="#" className="underline">{language === 'ar' ? 'الشروط والأحكام' : "Terms & Conditions"}</a>
+                  {language === 'ar' ? ' و' : ' and '} 
+                  <a href="#" className="underline">{language === 'ar' ? 'سياسة الخصوصية' : 'Privacy Policy'}</a>
+                </label>
+              </div>
+              {errors.agree && (
+                <p className="text-sm text-destructive flex items-center gap-1"><AlertCircle className="h-4 w-4" />{errors.agree}</p>
+              )}
+              <Button type="submit" disabled={loading} className="w-full bg-accent hover:bg-accent/90 text-white">
+                {t('registerAsTeacher')}
               </Button>
             </form>
-          </CardContent>
-          
-          <CardFooter className="flex justify-center">
-            <p className="text-sm text-muted-foreground">
-              {t('alreadyHaveAccount')}{" "}
-              <Link to="/login" className="text-primary hover:underline font-medium">
-                {t('loginButton')}
-              </Link>
-            </p>
-          </CardFooter>
-        </Card>
-      </main>
-      
-      <Footer />
+            <div className="mt-6 text-center text-sm text-gray-600">
+              {language === 'ar' ? 'يمكنك التسجيل أيضًا باستخدام:' : 'You can also sign up with:'}
+              <div className="mt-3 flex justify-center">
+                <Button type="button" variant="outline" onClick={async () => { try { await loginWithFacebook(); } catch (e) { toast.error(language === 'ar' ? 'فشل تسجيل فيسبوك' : 'Facebook sign-in failed'); }}}>
+                  Facebook
+                </Button>
+              </div>
+              <div className="mt-6">
+                {language === 'ar' ? 'لديك حساب بالفعل؟' : 'Already have an account?'}{' '}
+                <Link to="/login" className="text-blue-600 hover:underline">{language === 'ar' ? 'تسجيل الدخول' : 'Log In'}</Link>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 };

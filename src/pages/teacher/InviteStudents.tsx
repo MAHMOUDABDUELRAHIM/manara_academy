@@ -1028,7 +1028,7 @@ export default function InviteStudents() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 pt-16" dir={language === 'ar' ? 'rtl' : 'ltr'}>
+    <div className="min-h-screen bg-gray-50 pt-16" dir="ltr">
       <DashboardHeader fixed studentName={user.displayName || 'المدرس'} />
       
       <div className="flex min-h-[calc(100vh-4rem)]">
@@ -1325,7 +1325,7 @@ export default function InviteStudents() {
                           <div className="text-center">
                             <textarea
                               aria-label={language === 'ar' ? 'عنوان قسم إزاي منارة' : 'How Manara section title'}
-                              dir={language === 'ar' ? 'rtl' : 'ltr'}
+                              dir="ltr"
                               lang={language}
                               spellCheck={false}
                               value={language === 'ar' ? featuresTitleAr : featuresTitleEn}
@@ -1362,7 +1362,7 @@ export default function InviteStudents() {
                                 </div>
                                 <textarea
                                   aria-label={language === 'ar' ? 'عنوان العنصر' : 'Feature title'}
-                                  dir={language === 'ar' ? 'rtl' : 'ltr'}
+                                  dir="ltr"
                                   lang={language}
                                   spellCheck={false}
                                   value={language === 'ar' ? f.titleAr : f.titleEn}
@@ -1386,7 +1386,7 @@ export default function InviteStudents() {
                                 />
                                 <textarea
                                   aria-label={language === 'ar' ? 'وصف العنصر' : 'Feature description'}
-                                  dir={language === 'ar' ? 'rtl' : 'ltr'}
+                                  dir="ltr"
                                   lang={language}
                                   spellCheck={false}
                                   value={language === 'ar' ? f.descAr : f.descEn}

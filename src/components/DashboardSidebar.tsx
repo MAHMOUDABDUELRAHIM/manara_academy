@@ -110,7 +110,7 @@ export const DashboardSidebar = ({ className }: DashboardSidebarProps) => {
           isMobileOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0",
           className
         )}
-        dir={language === 'ar' ? 'rtl' : 'ltr'}
+        dir="ltr"
       >
         {/* Sidebar Header */}
         <div className="p-4 border-b border-border flex-shrink-0">

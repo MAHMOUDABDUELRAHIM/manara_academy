@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -8,6 +8,8 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useAuthContext } from "@/contexts/AuthContext";
+// (merged into top-level React import)
+import { TeacherService } from "@/services/teacherService";
 import DashboardHeader from "@/components/DashboardHeader";
 import TeacherSidebar from "@/components/TeacherSidebar";
 import FloatingSupportChat from "@/components/FloatingSupportChat";
@@ -131,6 +133,45 @@ export const TeacherCreateCourse = () => {
     objectives: ['']
   });
 
+  const [specializationCategory, setSpecializationCategory] = useState<string>('');
+  const [gradeOptions, setGradeOptions] = useState<{ value: string; label: string }[]>([]);
+  const [gradeLabel, setGradeLabel] = useState<string>('');
+
+  useEffect(() => {
+    const loadTeacher = async () => {
+      try {
+        const uid = user?.uid || (user as any)?.id;
+        if (!uid) return;
+        const teacher = await TeacherService.getTeacherByUid(uid);
+        const cat = (teacher as any)?.specializationCategory || '';
+        setSpecializationCategory(cat);
+        if (cat === 'thanaweya') {
+          setGradeLabel(language === 'ar' ? 'الصف الدراسي' : 'Grade');
+          setGradeOptions([
+            { value: 'اولي ثانوي', label: language === 'ar' ? 'أولى ثانوي' : 'Grade 10' },
+            { value: 'ثاني ثانوي', label: language === 'ar' ? 'ثاني ثانوي' : 'Grade 11' },
+            { value: 'ثالث ثانوي', label: language === 'ar' ? 'ثالث ثانوي' : 'Grade 12' },
+          ]);
+        } else if (cat === 'bakaloria') {
+          setGradeLabel(language === 'ar' ? 'الصف الدراسي' : 'Grade');
+          setGradeOptions([{ value: 'بكالوريا', label: language === 'ar' ? 'بكالوريا' : 'Baccalaureate' }]);
+        } else if (cat === 'talta_eadady') {
+          setGradeLabel(language === 'ar' ? 'الصف الدراسي' : 'Grade');
+          setGradeOptions([{ value: 'ثالث اعدادي', label: language === 'ar' ? 'ثالث اعدادي' : 'Grade 9' }]);
+        } else {
+          setGradeLabel(language === 'ar' ? 'المادة الدراسية' : 'Subject');
+          setGradeOptions([
+            { value: 'برمجة', label: language === 'ar' ? 'برمجة' : 'Programming' },
+            { value: 'مونتاج', label: language === 'ar' ? 'مونتاج' : 'Video Editing' },
+            { value: 'تصميم', label: language === 'ar' ? 'تصميم' : 'Design' },
+            { value: 'كتابة المحتوى', label: language === 'ar' ? 'كتابة المحتوى' : 'Content Writing' },
+          ]);
+        }
+      } catch {}
+    };
+    loadTeacher();
+  }, [user?.uid, language]);
+
   const [isSubmitting, setIsSubmitting] = useState(false);
   // Removed lessons management functions (add/remove/update) as lessons are added on a dedicated page
 
@@ -250,7 +291,7 @@ export const TeacherCreateCourse = () => {
   // Removed lesson type icon helper
 
   return (
-    <div className="min-h-screen bg-gray-50 pt-16" dir={language === 'ar' ? 'rtl' : 'ltr'}>
+    <div className="min-h-screen bg-gray-50 pt-16" dir="ltr">
       <DashboardHeader fixed studentName={teacherName} />
       
       <div className="flex min-h-[calc(100vh-4rem)]">
@@ -361,18 +402,20 @@ export const TeacherCreateCourse = () => {
 
                 <div className="space-y-2">
                   <Label htmlFor="category" className="text-[#2c4656] font-medium">
-                    {language === 'ar' ? 'التصنيف' : 'Category'} *
+                    {gradeLabel || (language === 'ar' ? 'الصف الدراسي' : 'Grade')} *
                   </Label>
                   <Select value={courseForm.category} onValueChange={(value) => setCourseForm(prev => ({ ...prev, category: value }))}>
                     <SelectTrigger className="border-gray-200 focus:border-[#2c4656] focus:ring-[#2c4656]">
-                      <SelectValue placeholder={language === 'ar' ? 'اختر التصنيف' : 'Select category'} />
+                      <SelectValue placeholder={language === 'ar' ? 'اختر قيمة' : 'Select value'} />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="ثالث اعدادي">{language === 'ar' ? 'ثالث اعدادي' : 'Grade 9'}</SelectItem>
-                      <SelectItem value="اولي ثانوي">{language === 'ar' ? 'اولي ثانوي' : 'Grade 10'}</SelectItem>
-                      <SelectItem value="بكالوريا">{language === 'ar' ? 'بكالوريا' : 'Baccalaureate'}</SelectItem>
-                      <SelectItem value="ثاني ثانوي">{language === 'ar' ? 'ثاني ثانوي' : 'Grade 11'}</SelectItem>
-                      <SelectItem value="ثالث ثانوي">{language === 'ar' ? 'ثالث ثانوي' : 'Grade 12'}</SelectItem>
+                      {gradeOptions.length > 0 ? (
+                        gradeOptions.map((opt) => (
+                          <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                        ))
+                      ) : (
+                        <SelectItem value="اولي ثانوي">{language === 'ar' ? 'أولى ثانوي' : 'Grade 10'}</SelectItem>
+                      )}
                     </SelectContent>
                   </Select>
                 </div>

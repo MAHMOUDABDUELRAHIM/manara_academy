@@ -14,7 +14,8 @@ import StudentRegister from "./pages/StudentRegister";
 import TeacherRegister from "./pages/TeacherRegister";
 import StudentDashboard from "./pages/StudentDashboard";
 import TeacherDashboard from "./pages/TeacherDashboard";
-import VerifyTeacherEmail from "./pages/VerifyTeacherEmail";
+ import VerifyTeacherEmail from "./pages/VerifyTeacherEmail";
+ import Onboarding from "./pages/teacher/Onboarding";
 import AdminDashboard from "./pages/AdminDashboard";
 import MyCourses from "./pages/MyCourses";
 import CourseCatalog from "./pages/CourseCatalog";
@@ -67,6 +68,7 @@ import ErrorBoundary from "@/components/ErrorBoundary";
               <Route path="/register/student/:code" element={<StudentRegister />} />
               <Route path="/register/teacher" element={<TeacherRegister />} />
               <Route path="/verify-teacher-email" element={<VerifyTeacherEmail />} />
+              <Route path="/teacher-onboarding" element={<Onboarding />} />
               <Route path="/invite/:teacherId" element={<InvitePage />} />
               <Route path="/dashboard" element={
                 <ProtectedRoute requiredRole="student" loginPath="/student-login">

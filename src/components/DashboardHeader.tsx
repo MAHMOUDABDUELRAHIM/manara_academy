@@ -761,8 +761,18 @@ export const DashboardHeader = ({
     }
   };
 
+  const avatarSrc = (() => {
+    const fromProp = (profileImage || '').toString().trim();
+    const fromUser = ((user as any)?.profile?.photoURL || user?.photoURL || '').toString().trim();
+    if (user?.role === 'teacher') {
+      return fromProp || fromUser || '/افاتار.png';
+    }
+    return fromProp || fromUser || '';
+  })();
+  const isDefaultAvatar = avatarSrc === '/افاتار.png';
+
   return (
-    <header className={fixed ? "bg-card border-b border-border fixed top-0 left-0 right-0 z-50" : "bg-card border-b border-border relative z-50"} dir={language === 'ar' ? 'rtl' : 'ltr'}>
+    <header className={fixed ? "bg-card border-b border-border fixed top-0 left-0 right-0 z-50" : "bg-card border-b border-border relative z-50"} dir="ltr">
       <div className={fixed ? "container mx-auto px-4 h-16 flex items-center justify-end" : "container mx-auto px-4 py-3 flex items-center justify-end"}>
         {/* Right side - Language, Notifications and Profile */}
         <div className="flex flex-row-reverse items-center gap-4">
@@ -786,7 +796,7 @@ export const DashboardHeader = ({
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" className="relative h-10 w-10 rounded-full">
                 <Avatar className="h-10 w-10">
-                  <AvatarImage src={profileImage} alt={studentName} />
+                  <AvatarImage src={avatarSrc} alt={studentName} className={isDefaultAvatar ? 'object-contain transform scale-[2]' : 'object-cover'} />
                   <AvatarFallback className="bg-primary text-primary-foreground">
                     {getInitials(studentName)}
                   </AvatarFallback>
@@ -848,9 +858,9 @@ export const DashboardHeader = ({
             </DropdownMenuTrigger>
             {!showNotifications && newNotificationPreviewInternal && previewPos && (
               <div
-                className={`fixed z-50 w-[220px] max-w-[90vw] rounded-xl border border-border bg-card shadow-xl p-2 animate-in fade-in slide-in-from-top-2 ${language === 'ar' ? 'text-right' : 'text-left'} relative`}
+                className={`fixed z-50 w-[220px] max-w-[90vw] rounded-xl border border-border bg-card shadow-xl p-2 animate-in fade-in slide-in-from-top-2 text-left relative`}
                 style={{ top: previewPos.top, left: previewPos.left, transform: 'translateX(-50%)' }}
-                dir={language === 'ar' ? 'rtl' : 'ltr'}
+                dir="ltr"
               >
                 <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-3 h-3 bg-card border border-border rotate-45" />
                 <div className="flex items-center justify-between">
@@ -943,7 +953,7 @@ export const DashboardHeader = ({
                         }
                       });
                       return visibleList.map((n) => (
-                      <div key={n.id} className="p-3 rounded-md transition-colors hover:bg-[#ee7b3d]/10" dir={language === 'ar' ? 'rtl' : 'ltr'}>
+                      <div key={n.id} className="p-3 rounded-md transition-colors hover:bg-[#ee7b3d]/10" dir="ltr">
                         <div className={`flex items-start justify-between ${language === 'ar' ? 'flex-row-reverse' : ''}`}>
                           <div className={`flex-1 ${language === 'ar' ? 'text-right' : ''}`}>
                             <div className="text-sm font-medium">{n.title}</div>

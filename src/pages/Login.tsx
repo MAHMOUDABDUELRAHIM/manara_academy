@@ -1,7 +1,5 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Header } from "@/components/Header";
-import { Footer } from "@/components/Footer";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -10,6 +8,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
+import { Globe, BookOpen, Users, Award, TrendingUp } from "lucide-react";
 
 const Login = () => {
   const [email, setEmail] = useState("");
@@ -94,21 +93,74 @@ const Login = () => {
   };
 
   return (
-    <div className="min-h-screen flex flex-col" dir={language === 'ar' ? 'rtl' : 'ltr'}>
-      <Header />
-      
-      <main className="flex-1 flex items-center justify-center px-4 py-12">
-        <Card className="w-full max-w-md">
-          <CardHeader className="space-y-1">
-            <CardTitle className="text-2xl font-heading font-bold text-center">
-              {t('loginTitle')}
-            </CardTitle>
-            <CardDescription className="text-center">
-              {t('loginDescription')}
-            </CardDescription>
-          </CardHeader>
-          
-          <CardContent className="space-y-4">
+    <div className="min-h-screen" dir={language === 'ar' ? 'rtl' : 'ltr'}>
+      <div className="fixed top-4 right-4 z-50">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => {
+            const next = language === 'ar' ? 'en' : 'ar';
+            try { localStorage.setItem('language', next as any); } catch {}
+            window.location.reload();
+          }}
+          className="flex items-center gap-2"
+        >
+          <Globe className="h-4 w-4" />
+          {language === 'ar' ? 'EN' : 'AR'}
+        </Button>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 min-h-screen">
+        <div className="relative bg-[#0b2a56] text-white p-8 flex items-center">
+          <div className="max-w-lg space-y-6">
+            <h2 className="text-2xl font-bold">
+              {language === 'ar' ? 'مرحباً بك في منارتك التعليمية' : 'Welcome to your teaching hub'}
+            </h2>
+            <p className="text-white/80">
+              {language === 'ar' ? 'سجّل دخولك لتتابع طلابك ودوراتك بسهولة.' : 'Sign in to manage your students and courses easily.'}
+            </p>
+            <div className="space-y-4">
+              <div className="flex items-start gap-3">
+                <BookOpen className="h-5 w-5 text-[#F59E0B]" />
+                <div>
+                  <div className="font-semibold">{language === 'ar' ? 'دورات منظمة' : 'Organized Courses'}</div>
+                  <div className="text-white/80 text-sm">{language === 'ar' ? 'إدارة الدروس والمواد بكل سهولة.' : 'Manage lessons and materials with ease.'}</div>
+                </div>
+              </div>
+              <div className="flex items-start gap-3">
+                <Users className="h-5 w-5 text-[#F59E0B]" />
+                <div>
+                  <div className="font-semibold">{language === 'ar' ? 'طلابك' : 'Your Students'}</div>
+                  <div className="text-white/80 text-sm">{language === 'ar' ? 'دعوة وربط وتتبع تفاعل الطلاب.' : 'Invite, link, and track student engagement.'}</div>
+                </div>
+              </div>
+              <div className="flex items-start gap-3">
+                <Award className="h-5 w-5 text-[#F59E0B]" />
+                <div>
+                  <div className="font-semibold">{language === 'ar' ? 'إنجازات وشهادات' : 'Achievements & Certificates'}</div>
+                  <div className="text-white/80 text-sm">{language === 'ar' ? 'إبراز التميز ومنح شهادات الإكمال.' : 'Highlight excellence and award certificates.'}</div>
+                </div>
+              </div>
+              <div className="flex items-start gap-3">
+                <TrendingUp className="h-5 w-5 text-[#F59E0B]" />
+                <div>
+                  <div className="font-semibold">{language === 'ar' ? 'إحصائيات مفيدة' : 'Useful Stats'}</div>
+                  <div className="text-white/80 text-sm">{language === 'ar' ? 'لوحات تعرض التقدم والأداء.' : 'Dashboards showing progress and performance.'}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="flex items-center justify-center bg-white p-8">
+          <Card className="w-full max-w-md shadow-none border-0">
+            <CardHeader className="space-y-1">
+              <CardTitle className="text-2xl font-heading font-bold text-center">
+                {t('loginTitle')}
+              </CardTitle>
+              <CardDescription className="text-center">
+                {t('loginDescription')}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
             {isSuspended && (
               <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded relative" role="alert">
                 <div className="flex items-center">
@@ -150,26 +202,28 @@ const Login = () => {
             <form onSubmit={handleLogin} className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="email">{t('email')}</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  placeholder={t('enterEmail')}
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                />
+                 <Input
+                   id="email"
+                   type="email"
+                   placeholder={t('enterEmail')}
+                   value={email}
+                   onChange={(e) => setEmail(e.target.value)}
+                   required
+                   className="h-12 rounded-lg shadow-sm border-gray-200 bg-white"
+                 />
               </div>
               
               <div className="space-y-2">
                 <Label htmlFor="password">{t('password')}</Label>
-                <Input
-                  id="password"
-                  type="password"
-                  placeholder={t('enterPassword')}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                />
+                 <Input
+                   id="password"
+                   type="password"
+                   placeholder={t('enterPassword')}
+                   value={password}
+                   onChange={(e) => setPassword(e.target.value)}
+                   required
+                   className="h-12 rounded-lg shadow-sm border-gray-200 bg-white"
+                 />
               </div>
               
               <div className="flex justify-end">
@@ -178,7 +232,7 @@ const Login = () => {
                 </Link>
               </div>
               
-              <Button type="submit" className="w-full" size="lg" disabled={loading}>
+              <Button type="submit" className="w-full bg-accent hover:bg-accent/90" size="lg" disabled={loading}>
                 {loading ? (language === 'ar' ? 'جاري تسجيل الدخول...' : 'Logging in...') : t('loginButton')}
               </Button>
             </form>
@@ -232,24 +286,22 @@ const Login = () => {
                 {t('facebook')}
               </Button>
             </div>
-          </CardContent>
-          
-          <CardFooter className="flex flex-col space-y-2">
-            <div className="text-sm text-center text-muted-foreground">
-              {t('dontHaveAccount')}{" "}
-              <Link to="/register/student" className="text-accent hover:underline font-medium">
-                {t('registerAsStudent')}
-              </Link>
-              {" / "}
-              <Link to="/register/teacher" className="text-accent hover:underline font-medium">
-                {t('registerAsTeacher')}
-              </Link>
-            </div>
-          </CardFooter>
-        </Card>
-      </main>
-      
-      <Footer />
+            </CardContent>
+            <CardFooter className="flex flex-col space-y-2">
+              <div className="text-sm text-center text-muted-foreground">
+                {t('dontHaveAccount')}{" "}
+                <Link to="/register/student" className="text-accent hover:underline font-medium">
+                  {t('registerAsStudent')}
+                </Link>
+                {" / "}
+                <Link to="/register/teacher" className="text-accent hover:underline font-medium">
+                  {t('registerAsTeacher')}
+                </Link>
+              </div>
+            </CardFooter>
+          </Card>
+        </div>
+      </div>
     </div>
   );
 };

@@ -4,7 +4,7 @@ import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuthContext } from '@/contexts/AuthContext';
 import DashboardHeader from '@/components/DashboardHeader';
 import { db } from '@/firebase/config';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, collection, query, where, onSnapshot } from 'firebase/firestore';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -57,6 +57,7 @@ const CourseDetails = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   // NEW: Track if student is already enrolled in this course
   const [isEnrolled, setIsEnrolled] = useState<boolean>(false);
+  const [hasPendingSubscription, setHasPendingSubscription] = useState<boolean>(false);
   
   // Notification states
   const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -225,6 +226,19 @@ const CourseDetails = () => {
       loadNotifications();
     }
   }, [user?.uid]);
+
+  useEffect(() => {
+    if (!user?.uid || !courseId) return;
+    const q = query(
+      collection(db, 'students', user.uid, 'subscriptionRequests'),
+      where('courseId', '==', String(courseId)),
+      where('status', '==', 'pending')
+    );
+    const unsub = onSnapshot(q, (snap) => {
+      setHasPendingSubscription(snap.size > 0);
+    });
+    return () => unsub();
+  }, [user?.uid, courseId]);
 
   // Handle notification item click
   const handleNotificationItemClick = (n: any) => {
@@ -643,17 +657,18 @@ const CourseDetails = () => {
                             type="file"
                             accept="image/*"
                             className="hidden"
+                            disabled={hasPendingSubscription}
                             onChange={(e) => setPaymentScreenshot(e.target.files?.[0] || null)}
                           />
                           <Button
                             type="button"
-                            variant="outline"
+                            variant={hasPendingSubscription ? 'secondary' : 'outline'}
                             onClick={() => fileInputRef.current?.click()}
-                            disabled={isUploading}
+                            disabled={isUploading || hasPendingSubscription}
                             className="flex items-center gap-2"
                           >
                             <Upload className="h-4 w-4" />
-                            {language === 'ar' ? 'رفع الصورة' : 'Upload Image'}
+                            {hasPendingSubscription ? (language === 'ar' ? 'قيد المراجعة' : 'Under Review') : (language === 'ar' ? 'رفع الصورة' : 'Upload Image')}
                           </Button>
                           {paymentScreenshot && (
                             <span className="text-xs text-muted-foreground">{paymentScreenshot.name}</span>
@@ -672,12 +687,14 @@ const CourseDetails = () => {
                       <div className="flex items-center gap-2">
                         <Button
                           onClick={handleSendPayment}
-                          disabled={isUploading || !paymentScreenshot}
+                          disabled={isUploading || !paymentScreenshot || hasPendingSubscription}
                           className="bg-[#2c8a4f] hover:bg-[#257a46] text-white"
                         >
-                          {isUploading
-                            ? (language === 'ar' ? 'جاري الإرسال...' : 'Sending...')
-                            : (language === 'ar' ? 'لقد قمت بالدفع' : 'I have paid')}
+                          {hasPendingSubscription
+                            ? (language === 'ar' ? 'قيد المراجعة' : 'Under Review')
+                            : (isUploading
+                              ? (language === 'ar' ? 'جاري الإرسال...' : 'Sending...')
+                              : (language === 'ar' ? 'لقد قمت بالدفع' : 'I have paid'))}
                         </Button>
                         <Button
                           variant="ghost"

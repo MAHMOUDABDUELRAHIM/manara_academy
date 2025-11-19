@@ -13,6 +13,8 @@ import { Image as ImageIcon } from "lucide-react";
 import { TeacherService } from "@/services/teacherService";
 import { SubscriptionRequestService, SubscriptionRequest } from "@/services/subscriptionRequestService";
 import { toast } from "sonner";
+import { collection, onSnapshot, query, where } from "firebase/firestore";
+import { db } from "@/firebase/config";
 
 export const TeacherPayouts = () => {
   const { language } = useLanguage();
@@ -32,6 +34,7 @@ export const TeacherPayouts = () => {
 
   const pendingRequests = requests.filter(r => r.status === 'pending');
   const approvedRequests = requests.filter(r => r.status === 'confirmed');
+
 
   useEffect(() => {
     const init = async () => {
@@ -59,6 +62,16 @@ export const TeacherPayouts = () => {
       }
     };
     init();
+  }, [user?.uid]);
+
+  useEffect(() => {
+    if (!user?.uid) return;
+    const q = query(collection(db, 'subscriptionRequests'), where('teacherId', '==', user.uid));
+    const unsub = onSnapshot(q, (snap) => {
+      const next: SubscriptionRequest[] = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
+      setRequests(next);
+    });
+    return () => unsub();
   }, [user?.uid]);
 
   const handleSavePaymentNumber = async () => {
@@ -95,7 +108,7 @@ export const TeacherPayouts = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 pt-16" dir={language === 'ar' ? 'rtl' : 'ltr'}>
+    <div className="min-h-screen bg-gray-50 pt-16" dir="ltr">
       <DashboardHeader fixed studentName={teacherName} />
       
       <div className="flex min-h-[calc(100vh-4rem)]">

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import DashboardHeader from '@/components/DashboardHeader';
 import TeacherSidebar from '@/components/TeacherSidebar';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
@@ -8,7 +9,7 @@ import { Label } from '@/components/ui/label';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/hooks/useAuth';
 import { TeacherService, TeacherProfile } from '@/services/teacherService';
-import { sendPasswordResetEmail } from 'firebase/auth';
+import { sendPasswordResetEmail, EmailAuthProvider, reauthenticateWithCredential, signOut } from 'firebase/auth';
 import { auth, db } from '@/firebase/config';
 import {
   Settings,
@@ -30,6 +31,8 @@ import {
   Palette,
   Type,
   MessageCircle,
+  UploadCloud,
+  Check,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -52,10 +55,12 @@ import {
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
 import { collection, doc, updateDoc, query, where, getDocs, deleteDoc, getDoc } from 'firebase/firestore';
+import { Textarea } from '@/components/ui/textarea';
 
 const TeacherSettings = () => {
   const { language } = useLanguage();
   const { user } = useAuth();
+  const navigate = useNavigate();
   // Trial expiration: block assistant creation after 24h from account creation
   const createdRaw: any = user?.profile?.createdAt as any;
   const createdMs = createdRaw
@@ -113,10 +118,26 @@ const TeacherSettings = () => {
   const [selectedAssistant, setSelectedAssistant] = useState<any | null>(null);
   const [editPages, setEditPages] = useState<string[]>([]);
   const [editActions, setEditActions] = useState<string[]>([]);
+  const [profilePhotoURL, setProfilePhotoURL] = useState<string>('');
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [bioInput, setBioInput] = useState('');
+  const [savingBio, setSavingBio] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [confirmDeleteStepDone, setConfirmDeleteStepDone] = useState(false);
+  const [pwd, setPwd] = useState('');
+  const [verifyingPwd, setVerifyingPwd] = useState(false);
+  const [pwdValid, setPwdValid] = useState(false);
+  const [deletingAccount, setDeletingAccount] = useState(false);
 
   // Permissions: pages the assistant can see and actions they can perform
   const [allowedPages, setAllowedPages] = useState<string[]>([]);
   const [allowedActions, setAllowedActions] = useState<string[]>([]);
+
+  // Platform branding inputs
+  const [platformNameInput, setPlatformNameInput] = useState('');
+  const [brandLogoBase64, setBrandLogoBase64] = useState('');
+  const [heroTitleInput, setHeroTitleInput] = useState('');
+  const [heroImageBase64, setHeroImageBase64] = useState('');
 
   const pageOptions: { key: string; label: string; Icon: React.ComponentType<any> }[] = [
     { key: 'dashboard', label: language === 'ar' ? 'لوحة التحكم' : 'Dashboard', Icon: LayoutDashboard },
@@ -228,6 +249,12 @@ const TeacherSettings = () => {
         const teacher = await TeacherService.getTeacherByUid(user.uid);
         setProfile(teacher);
         if (teacher?.fullName) setFullNameInput(teacher.fullName);
+        if (typeof teacher?.photoURL === 'string') setProfilePhotoURL(teacher.photoURL || '');
+        if (typeof teacher?.bio === 'string') setBioInput(teacher.bio || '');
+        if (typeof (teacher as any)?.platformName === 'string') setPlatformNameInput((teacher as any).platformName || '');
+        if (typeof (teacher as any)?.brandLogoBase64 === 'string') setBrandLogoBase64((teacher as any).brandLogoBase64 || '');
+        if (typeof (teacher as any)?.brandHeroTitle === 'string') setHeroTitleInput((teacher as any).brandHeroTitle || '');
+        if (typeof (teacher as any)?.brandHeroImageBase64 === 'string') setHeroImageBase64((teacher as any).brandHeroImageBase64 || '');
       } catch (e) {
         console.error('Error loading teacher profile', e);
       } finally {
@@ -298,6 +325,119 @@ const TeacherSettings = () => {
       toast.error(language === 'ar' ? 'فشل حفظ التغييرات' : 'Failed to save changes');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const compressImageToBase64 = (file: File, maxSize: number, quality: number): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          let w = img.width;
+          let h = img.height;
+          const maxDim = Math.max(w, h);
+          if (maxDim > maxSize) {
+            const scale = maxSize / maxDim;
+            w = Math.round(w * scale);
+            h = Math.round(h * scale);
+          }
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) { reject(new Error('noctx')); return; }
+          ctx.drawImage(img, 0, 0, w, h);
+          const dataUrl = canvas.toDataURL('image/jpeg', quality);
+          resolve(dataUrl);
+        };
+        img.onerror = () => reject(new Error('imgerr'));
+        img.src = reader.result as string;
+      };
+      reader.onerror = () => reject(new Error('readerr'));
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const handleAvatarFile = async (file: File) => {
+    if (!user?.uid) return;
+    try {
+      setUploadingAvatar(true);
+      if (!file.type.startsWith('image/')) {
+        toast.error(language === 'ar' ? 'الملف المختار ليس صورة' : 'Selected file is not an image');
+        return;
+      }
+      const base64Image = await compressImageToBase64(file, 512, 0.75);
+      await TeacherService.updateTeacherProfile(user.uid, { photoURL: base64Image });
+      setProfilePhotoURL(base64Image);
+      toast.success(language === 'ar' ? 'تم تحديث صورة الأفاتار' : 'Avatar updated');
+    } catch (error) {
+      console.error('Avatar upload error', error);
+      toast.error(language === 'ar' ? 'فشل رفع الصورة' : 'Failed to upload image');
+    } finally {
+      setUploadingAvatar(false);
+    }
+  };
+
+  const saveBio = async () => {
+    if (!user?.uid) return;
+    const val = bioInput.trim();
+    try {
+      setSavingBio(true);
+      await TeacherService.updateTeacherProfile(user.uid, { bio: val });
+      setProfile(prev => prev ? { ...prev, bio: val, updatedAt: new Date().toISOString() } : prev);
+      toast.success(language === 'ar' ? 'تم حفظ السيرة الذاتية' : 'Bio saved');
+    } catch (e) {
+      console.error('Save bio error', e);
+      toast.error(language === 'ar' ? 'فشل حفظ السيرة الذاتية' : 'Failed to save bio');
+    } finally {
+      setSavingBio(false);
+    }
+  };
+
+  const saveBranding = async () => {
+    if (!user?.uid) return;
+    try {
+      await TeacherService.updateTeacherProfile(user.uid, {
+        platformName: platformNameInput.trim(),
+        brandLogoBase64: brandLogoBase64,
+        brandHeroTitle: heroTitleInput.trim(),
+        brandHeroImageBase64: heroImageBase64,
+      } as any);
+      setProfile(prev => prev ? { ...prev, updatedAt: new Date().toISOString() } : prev);
+      toast.success(language === 'ar' ? 'تم حفظ إعدادات المنصة' : 'Platform settings saved');
+    } catch (e) {
+      console.error('Save branding error', e);
+      toast.error(language === 'ar' ? 'فشل حفظ إعدادات المنصة' : 'Failed to save platform settings');
+    }
+  };
+
+  const verifyPassword = async (pwdVal: string) => {
+    if (!user?.email || !auth.currentUser) { setPwdValid(false); return; }
+    try {
+      setVerifyingPwd(true);
+      const cred = EmailAuthProvider.credential(user.email, pwdVal);
+      await reauthenticateWithCredential(auth.currentUser, cred);
+      setPwdValid(true);
+    } catch {
+      setPwdValid(false);
+    } finally {
+      setVerifyingPwd(false);
+    }
+  };
+
+  const deleteAccount = async () => {
+    if (!user?.uid) return;
+    try {
+      setDeletingAccount(true);
+      await TeacherService.deleteTeacherProfile(user.uid);
+      await signOut(auth);
+      navigate('/login');
+    } catch (e) {
+      console.error('Delete account error', e);
+      toast.error(language === 'ar' ? 'فشل حذف الحساب' : 'Failed to delete account');
+    } finally {
+      setDeletingAccount(false);
     }
   };
 
@@ -469,7 +609,7 @@ const TeacherSettings = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 pt-16" dir={language === 'ar' ? 'rtl' : 'ltr'}>
+    <div className="min-h-screen bg-gray-50 pt-16" dir="ltr">
       <DashboardHeader fixed studentName={profile?.fullName || user?.displayName || user?.email || ''} />
       <div className="container mx-auto px-4 py-6">
         <TeacherSidebar />
@@ -527,8 +667,95 @@ const TeacherSettings = () => {
                   {language === 'ar' ? 'إرسال رابط إعادة تعيين كلمة المرور' : 'Send Password Reset Link'}
                 </Button>
               </div>
-            </CardContent>
-          </Card>
+          </CardContent>
+        </Card>
+
+        <Card className="mt-6 bg-white border border-gray-200 shadow-sm rounded-xl">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Settings className="h-5 w-5" />
+              {language === 'ar' ? 'الملف الشخصي' : 'Profile'}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="space-y-3">
+                <Label>{language === 'ar' ? 'صورة الأفَاتار' : 'Avatar Image'}</Label>
+                <div className="flex items-center gap-4">
+                  <img src={(profilePhotoURL && profilePhotoURL.trim()) ? profilePhotoURL : '/افاتار.png'} alt="avatar" className="h-20 w-20 rounded-full object-cover" />
+                  <div className="flex items-center gap-2">
+                    <Input type="file" accept="image/*" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleAvatarFile(f); }} />
+                    <Button disabled={uploadingAvatar} className="bg-[#ee7b3d] hover:bg-[#ee7b3d]/90 text-white">
+                      {uploadingAvatar && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                      <UploadCloud className="h-4 w-4 mr-2" />
+                      {language === 'ar' ? 'رفع الصورة' : 'Upload'}
+                    </Button>
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {language === 'ar' ? 'قد تظهر صورتك وسيرتك على الصفحة الرئيسية إذا تم اختيارك ضمن "مدرسين الشهر".' : 'Your avatar and bio may appear on the homepage if selected as Teacher of the Month.'}
+                </p>
+              </div>
+              <div className="space-y-3">
+                <Label>{language === 'ar' ? 'السيرة الذاتية' : 'Bio'}</Label>
+                <Textarea value={bioInput} onChange={(e) => setBioInput(e.target.value)} rows={6} />
+                <div>
+                  <Button onClick={saveBio} disabled={savingBio} className="bg-[#ee7b3d] hover:bg-[#ee7b3d]/90 text-white">
+                    {savingBio && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                    {language === 'ar' ? 'حفظ السيرة' : 'Save Bio'}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="mt-6 bg-white border border-gray-200 shadow-sm rounded-xl">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Palette className="h-5 w-5" />
+              {language === 'ar' ? 'إعدادات المنصة' : 'Platform Branding'}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="space-y-2">
+                <Label>{language === 'ar' ? 'اسم المنصة' : 'Platform Name'}</Label>
+                <Input value={platformNameInput} onChange={(e) => setPlatformNameInput(e.target.value)} className="h-12 rounded-lg shadow-sm border-gray-200 bg-white" />
+              </div>
+              <div className="space-y-2">
+                <Label>{language === 'ar' ? 'لوجو المنصة' : 'Platform Logo'}</Label>
+                <div className="flex items-center gap-4">
+                  <img src={brandLogoBase64 || '/Header-Logo.png'} alt="brand logo" className="h-16 w-16 rounded object-contain border" />
+                  <div className="flex items-center gap-2">
+                    <Input type="file" accept="image/*" onChange={async (e) => { const f = e.target.files?.[0]; if (f) setBrandLogoBase64(await compressImageToBase64(f, 512, 0.8)); }} />
+                    <Button className="bg-[#ee7b3d] hover:bg-[#ee7b3d]/90 text-white" onClick={saveBranding}>
+                      <UploadCloud className="h-4 w-4 mr-2" />
+                      {language === 'ar' ? 'حفظ' : 'Save'}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label>{language === 'ar' ? 'نص الـ Hero' : 'Hero Text'}</Label>
+                <Input value={heroTitleInput} onChange={(e) => setHeroTitleInput(e.target.value)} className="h-12 rounded-lg shadow-sm border-gray-200 bg-white" />
+              </div>
+              <div className="space-y-2">
+                <Label>{language === 'ar' ? 'صورة الـ Hero' : 'Hero Image'}</Label>
+                <div className="flex items-center gap-4">
+                  <img src={heroImageBase64 || '/manara-hero.png'} alt="hero" className="h-20 w-32 rounded object-cover border" />
+                  <div className="flex items-center gap-2">
+                    <Input type="file" accept="image/*" onChange={async (e) => { const f = e.target.files?.[0]; if (f) setHeroImageBase64(await compressImageToBase64(f, 1024, 0.8)); }} />
+                    <Button className="bg-[#ee7b3d] hover:bg-[#ee7b3d]/90 text-white" onClick={saveBranding}>
+                      <UploadCloud className="h-4 w-4 mr-2" />
+                      {language === 'ar' ? 'حفظ' : 'Save'}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
 
           {/* Assistant creation section */}
           <Card className="mt-6 bg-white border border-gray-200 shadow-sm rounded-xl">
@@ -760,9 +987,54 @@ const TeacherSettings = () => {
                   </div>
                 </div>
               )}
-            </DialogContent>
-          </Dialog>
-        </main>
+          </DialogContent>
+        </Dialog>
+
+        <div className="mt-6">
+          <Button onClick={() => { setDeleteOpen(true); setConfirmDeleteStepDone(false); setPwd(''); setPwdValid(false); }} className="bg-red-600 hover:bg-red-700 text-white">
+            {language === 'ar' ? 'حذف الحساب' : 'Delete Account'}
+          </Button>
+        </div>
+
+        <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+          <DialogContent className="max-w-lg">
+            <DialogHeader>
+              <DialogTitle>{language === 'ar' ? 'حذف الحساب نهائيًا' : 'Delete Account Permanently'}</DialogTitle>
+            </DialogHeader>
+            {!confirmDeleteStepDone ? (
+              <div className="space-y-4">
+                <p className="text-sm text-muted-foreground">
+                  {language === 'ar' ? 'سيتم حذف جميع بياناتك من قاعدة البيانات. هل أنت متأكد؟' : 'All your data will be removed from the database. Are you sure?'}
+                </p>
+                <div className="flex justify-end gap-2">
+                  <Button variant="outline" onClick={() => setDeleteOpen(false)}>{language === 'ar' ? 'إلغاء' : 'Cancel'}</Button>
+                  <Button onClick={() => setConfirmDeleteStepDone(true)} className="bg-red-600 hover:bg-red-700 text-white">{language === 'ar' ? 'تأكيد' : 'Confirm'}</Button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label>{language === 'ar' ? 'اكتب كلمة المرور للتحقق' : 'Enter password to verify'}</Label>
+                  <div className="flex items-center gap-2">
+                    <Input type="password" value={pwd} onChange={(e) => { const v = e.target.value; setPwd(v); verifyPassword(v); }} />
+                    {verifyingPwd ? <Loader2 className="h-4 w-4 animate-spin" /> : (pwdValid ? <Check className="h-4 w-4 text-emerald-600" /> : null)}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {language === 'ar' ? 'لن يتم تفعيل زر الحذف إلا بعد التحقق من كلمة المرور.' : 'Delete button is enabled only after password verification.'}
+                  </p>
+                </div>
+                <div className="flex justify-end gap-2">
+                  <Button variant="outline" onClick={() => setDeleteOpen(false)}>{language === 'ar' ? 'إلغاء' : 'Cancel'}</Button>
+                  <Button onClick={deleteAccount} disabled={!pwdValid || deletingAccount} className="bg-red-600 hover:bg-red-700 text-white">
+                    {deletingAccount && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                    {language === 'ar' ? 'حذف الحساب نهائياً' : 'Delete Account'}
+                  </Button>
+                </div>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
+      </main>
       </div>
     </div>
   );

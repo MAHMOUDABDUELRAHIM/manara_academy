@@ -20,6 +20,9 @@ import {
   Lock,
   ExternalLink
 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { collection, onSnapshot, query, where } from "firebase/firestore";
+import { db } from "@/firebase/config";
 
 interface SidebarItem {
   id: string;
@@ -38,6 +41,7 @@ export const TeacherSidebar = ({ className, isSubscriptionApproved = false }: Te
   const location = useLocation();
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [isMobileOpen, setIsMobileOpen] = useState(false);
+  const [pendingSubCount, setPendingSubCount] = useState<number>(0);
 
   // Effective approval status: prefer prop when provided, otherwise fall back to localStorage
   const [approved, setApproved] = useState<boolean>(() => {
@@ -146,6 +150,38 @@ export const TeacherSidebar = ({ className, isSubscriptionApproved = false }: Te
     setIsMobileOpen(!isMobileOpen);
   };
   const { user } = useAuth();
+  const playNotificationTone = () => {
+    try {
+      const AC: any = (window as any).AudioContext || (window as any).webkitAudioContext;
+      const ctx = new AC();
+      const g = ctx.createGain();
+      const start = ctx.currentTime;
+      g.gain.setValueAtTime(0, start);
+      g.gain.linearRampToValueAtTime(0.6, start + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, start + 0.7);
+      g.connect(ctx.destination);
+      const o1 = ctx.createOscillator(); o1.type = 'triangle'; o1.frequency.setValueAtTime(660, start); o1.connect(g); o1.start(start); o1.stop(start + 0.45);
+      const o2 = ctx.createOscillator(); o2.type = 'triangle'; o2.frequency.setValueAtTime(990, start); o2.connect(g); o2.start(start); o2.stop(start + 0.45);
+      const o3 = ctx.createOscillator(); o3.type = 'triangle'; o3.frequency.setValueAtTime(1320, start + 0.12); o3.connect(g); o3.start(start + 0.12); o3.stop(start + 0.6);
+    } catch {}
+  };
+  useEffect(() => {
+    if (!user?.uid) return;
+    const q = query(collection(db, 'subscriptionRequests'), where('teacherId', '==', user.uid));
+    let isFirst = true;
+    const unsub = onSnapshot(q, (snap) => {
+      let count = 0;
+      snap.forEach((d) => {
+        const st = (d.data() as any)?.status;
+        if (st === 'pending') count++;
+      });
+      setPendingSubCount(count);
+      if (isFirst) { isFirst = false; return; }
+      const hasNewPending = snap.docChanges().some(ch => ch.type === 'added' && (ch.doc.data() as any)?.status === 'pending');
+      if (hasNewPending) playNotificationTone();
+    });
+    return () => unsub();
+  }, [user?.uid]);
   const studentPlatformHref = user?.uid ? `/invite/${user.uid}` : '/invite/teacher-id';
 
   return (
@@ -178,7 +214,7 @@ export const TeacherSidebar = ({ className, isSubscriptionApproved = false }: Te
           isMobileOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0",
           className
         )}
-        dir={language === 'ar' ? 'rtl' : 'ltr'}
+        dir="ltr"
       >
         <div className="px-4 py-3 border-b border-[#2a1f62] flex-shrink-0 bg-[#1d1442]">
           <div className="flex items-center justify-between">
@@ -345,6 +381,11 @@ export const TeacherSidebar = ({ className, isSubscriptionApproved = false }: Te
                           <span className="text-sm font-medium truncate">
                             {item.label}
                           </span>
+                        )}
+                        {pendingSubCount > 0 && !isCollapsed && (
+                          <Badge variant="destructive" className="ml-auto">
+                            {pendingSubCount}
+                          </Badge>
                         )}
                       </Link>
                     </li>

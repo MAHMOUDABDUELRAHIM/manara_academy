@@ -857,6 +857,7 @@ export const TeacherDashboard = () => {
 
   // حالة موافقة الاشتراك من قبل الإدارة
   const [isSubscriptionApproved, setIsSubscriptionApproved] = useState<boolean>(false);
+  const [courseStudentsCount, setCourseStudentsCount] = useState<Record<string, number>>({});
 
   // تحديث الإحصائيات عند تغيير الدورات
   useEffect(() => {
@@ -1060,6 +1061,52 @@ export const TeacherDashboard = () => {
     };
     fetchCourses();
   }, [effectiveTeacherId]);
+
+  useEffect(() => {
+    const computeCounts = async () => {
+      if (!effectiveTeacherId || courses.length === 0) {
+        setCourseStudentsCount({});
+        return;
+      }
+      const counts: Record<string, number> = {};
+      for (const course of courses) {
+        try {
+          const qref = query(
+            collection(db, 'students'),
+            where('teacherId', '==', effectiveTeacherId),
+            where('enrolledCourses', 'array-contains', course.id)
+          );
+          const snap = await getDocs(qref);
+          counts[course.id] = snap.size;
+        } catch {
+          counts[course.id] = 0;
+        }
+      }
+      setCourseStudentsCount(counts);
+    };
+    computeCounts();
+  }, [courses, effectiveTeacherId]);
+
+  useEffect(() => {
+    if (!effectiveTeacherId || courses.length === 0) return;
+    const studentsQ = query(
+      collection(db, 'students'),
+      where('teacherId', '==', effectiveTeacherId)
+    );
+    const unsub = onSnapshot(studentsQ, (snap) => {
+      const counts: Record<string, number> = {};
+      for (const c of courses) counts[c.id] = 0;
+      snap.forEach((doc) => {
+        const data = doc.data() as any;
+        const enrolled: string[] = data.enrolledCourses || [];
+        for (const cid of enrolled) {
+          if (counts[cid] != null) counts[cid] += 1;
+        }
+      });
+      setCourseStudentsCount(counts);
+    });
+    return () => unsub();
+  }, [effectiveTeacherId, courses]);
 
   // جلب الطلاب المرتبطين والمسجلين
   useEffect(() => {
@@ -1376,7 +1423,7 @@ export const TeacherDashboard = () => {
   );
 
   return (
-    <div className="min-h-screen bg-gray-50 pt-16" dir={language === 'ar' ? 'rtl' : 'ltr'}>
+    <div className="min-h-screen bg-gray-50 pt-16" dir="ltr">
       <Dialog open={showWelcomeTrial} onOpenChange={(open) => {
         setShowWelcomeTrial(open);
         try {
@@ -1418,7 +1465,7 @@ export const TeacherDashboard = () => {
                       : 'Welcome! Try our premium features to determine the best plan for you. Your features include:'}
                   </DialogDescription>
                 </DialogHeader>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4" dir={language === 'ar' ? 'rtl' : 'ltr'}>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4" dir="ltr">
                   {[
                     { ar: 'لوحة التحكم والإحصائيات السريعة', en: 'Dashboard & quick stats' },
                     { ar: 'إدارة الدورات الحالية', en: 'Manage existing courses' },
@@ -1427,7 +1474,7 @@ export const TeacherDashboard = () => {
                     { ar: 'دعوة الطلاب وتخصيص المنصة', en: 'Invite students & customize platform' },
                     { ar: 'الأرباح والمدفوعات', en: 'Earnings & payouts' },
                   ].map((item, idx) => (
-                    <div key={idx} className={`flex items-center justify-between border rounded-lg p-3 ${language === 'ar' ? 'flex-row-reverse text-right' : ''}`}>
+                    <div key={idx} className="flex items-center justify-between border rounded-lg p-3">
                       <span className="text-sm text-gray-900">
                         {language === 'ar' ? item.ar : item.en}
                       </span>
@@ -1934,7 +1981,7 @@ export const TeacherDashboard = () => {
           </Card>
           {/* Account Info Dialog */}
           <Dialog open={showStudentInfo} onOpenChange={setShowStudentInfo}>
-            <DialogContent className="sm:max-w-2xl xl:max-w-4xl" dir={language === 'ar' ? 'rtl' : 'ltr'}>
+            <DialogContent className="sm:max-w-2xl xl:max-w-4xl" dir="ltr">
               <DialogHeader>
                 <DialogTitle className="text-center">{language === 'ar' ? 'معلومات الحساب' : 'Account Information'}</DialogTitle>
               </DialogHeader>
@@ -2005,7 +2052,7 @@ export const TeacherDashboard = () => {
           </Dialog>
           {/* Delete Confirmation */}
           <AlertDialog open={!!deletingStudentId} onOpenChange={(open) => !open && setDeletingStudentId(null)}>
-            <AlertDialogContent dir={language === 'ar' ? 'rtl' : 'ltr'}>
+            <AlertDialogContent dir="ltr">
               <AlertDialogHeader>
                 <AlertDialogTitle>{language === 'ar' ? 'تأكيد حذف الحساب' : 'Confirm Account Deletion'}</AlertDialogTitle>
                 <AlertDialogDesc>{language === 'ar' ? 'سيتم حذف بيانات الطالب نهائياً ولا يمكن استعادتها.' : 'This will permanently delete the student data and cannot be undone.'}</AlertDialogDesc>
@@ -2036,11 +2083,11 @@ export const TeacherDashboard = () => {
           {isSubscriptionApproved && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* My Courses Section */}
-            <div className="lg:col-span-2">
+            <div className="lg:col-span-3">
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center justify-between">
-                    <span>{language === 'ar' ? 'دوراتي' : 'My Courses'}</span>
+                    <span>{language === 'ar' ? 'كورساتي' : 'My Courses'}</span>
                     {courses.length > 0 && (
                       <Link to="/teacher-dashboard/courses">
                         <Button variant="ghost" size="sm">
@@ -2062,99 +2109,39 @@ export const TeacherDashboard = () => {
                   ) : courses.length === 0 ? (
                     <EmptyCoursesState />
                   ) : (
-                    <div className="space-y-4">
-                      {courses.slice(0, 3).map((course) => (
-                        <div key={course.id} className="flex items-center space-x-4 p-4 border rounded-lg hover:bg-accent/50 transition-colors">
-                          <div className="w-16 h-16 bg-muted rounded-lg flex items-center justify-center overflow-hidden">
-                            {course.thumbnail ? (
-                              <img 
-                                src={course.thumbnail} 
-                                alt={course.title}
-                                className="w-full h-full object-cover"
-                              />
-                            ) : (
-                              <BookOpen className="h-8 w-8 text-muted-foreground" />
-                            )}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <h3 className="font-medium truncate">{course.title}</h3>
-                            <p className="text-sm text-muted-foreground">{course.enrolledStudents} {language === 'ar' ? 'طالب' : 'students'}</p>
-                            <div className="flex items-center gap-2 mt-2">
-                              <Badge variant={getStatusBadge(course.status).variant}>
-                                {getStatusBadge(course.status).label}
-                              </Badge>
-                              <span className="text-sm text-muted-foreground">
-                                {course.price} {language === 'ar' ? 'ج.م' : 'EGP'}
-                              </span>
+                    <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
+                      {courses.map((course) => {
+                        const students = courseStudentsCount[course.id] ?? 0;
+                        const earnings = Math.round((course.price || 0) * students);
+                        return (
+                          <div key={course.id} className="group border rounded-xl overflow-hidden hover:shadow-md transition-shadow bg-white">
+                            <div className="w-full h-32 bg-muted">
+                              {course.thumbnail ? (
+                                <img src={course.thumbnail} alt={course.title} className="w-full h-full object-cover" />
+                              ) : (
+                                <div className="w-full h-full flex items-center justify-center">
+                                  <BookOpen className="h-10 w-10 text-muted-foreground" />
+                                </div>
+                              )}
+                            </div>
+                            <div className="p-4 text-center">
+                              <h3 className="font-medium truncate" title={course.title}>{course.title}</h3>
+                              <div className="mt-1 text-xs text-muted-foreground">
+                                {students} {language === 'ar' ? 'طالب' : 'students'} • {earnings} {language === 'ar' ? 'ج.م' : 'EGP'}
+                              </div>
+                              <div className="mt-2 flex items-center justify-center gap-2">
+                                <Badge variant={getStatusBadge(course.status).variant}>{getStatusBadge(course.status).label}</Badge>
+                                <Link to={`/teacher-dashboard/courses/${course.id}/add-lesson`}>
+                                  <Button size="sm" variant="outline" className="h-7 px-2">
+                                    <Plus className="h-3.5 w-3.5 mr-1" />
+                                    {language === 'ar' ? 'إضافة درس' : 'Add Lesson'}
+                                  </Button>
+                                </Link>
+                              </div>
                             </div>
                           </div>
-                          <Link to={`/teacher-dashboard/courses/${course.id}/add-lesson`}>
-                            <Button size="sm" className="flex-shrink-0">
-                              <Plus className="h-4 w-4 mr-2" />
-                              {language === 'ar' ? 'إضافة درس' : 'Add Lesson'}
-                            </Button>
-                          </Link>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            </div>
-
-            {/* Notifications Section */}
-            <div>
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Bell className="h-5 w-5" />
-                    {language === 'ar' ? 'الإشعارات' : 'Notifications'}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {notifications.length === 0 ? (
-                    <EmptyNotificationsState />
-                  ) : (
-                    <div className="space-y-4" dir={language === 'ar' ? 'rtl' : 'ltr'}>
-                      {notifications.map((notification) => (
-                        <div key={notification.id} className="p-3 border rounded-lg">
-                          <div className={`flex items-start justify-between ${language === 'ar' ? 'flex-row-reverse' : ''}`}>
-                            <div className={`flex-1 ${language === 'ar' ? 'text-right' : ''}`}>
-                              <h4 className="text-sm font-medium">{notification.title}</h4>
-                              <p className="text-xs text-muted-foreground mt-1">
-                                {notification.message}
-                              </p>
-                              <p className="text-xs text-muted-foreground mt-2">
-                                <Clock className={`h-3 w-3 inline ${language === 'ar' ? 'ml-1' : 'mr-1'}`} />
-                                {(() => {
-                                  try {
-                                    const d = new Date(notification.time);
-                                    const now = new Date();
-                                    const same = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
-                                    const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
-                                    const isTomorrow = d.getFullYear() === tomorrow.getFullYear() && d.getMonth() === tomorrow.getMonth() && d.getDate() === tomorrow.getDate();
-                                    const timeStr = d.toLocaleTimeString(language === 'ar' ? 'ar-EG' : 'en-US', { hour: 'numeric', minute: '2-digit' });
-                                    if (same) return language === 'ar' ? `اليوم ${timeStr}` : `today ${timeStr}`;
-                                    if (isTomorrow) return language === 'ar' ? `غداً ${timeStr}` : `tomorrow ${timeStr}`;
-                                    return d.toLocaleDateString(language === 'ar' ? 'ar-EG' : 'en-US', { year: 'numeric', month: 'long', day: 'numeric' });
-                                  } catch {
-                                    return notification.time;
-                                  }
-                                })()}
-                              </p>
-                            </div>
-                            <Badge 
-                              variant={
-                                notification.type === 'success' ? 'default' :
-                                notification.type === 'warning' ? 'destructive' : 'secondary'
-                              }
-                              className="ml-2"
-                            >
-                              {notification.type}
-                            </Badge>
-                          </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </CardContent>
